@@ -52,7 +52,11 @@ def main():
     torch.cuda.set_device(args.local_device_rank)
     args.device = torch.device("cuda", args.local_device_rank)
 
-    dist.init_process_group(backend="nccl")
+    # 早知道就不在 windows 下操作了
+    if os.name == "nt":
+        dist.init_process_group(backend="gloo")
+    else:
+        dist.init_process_group(backend="nccl")
     args.rank = dist.get_rank()
     args.world_size = dist.get_world_size()
 

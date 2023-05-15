@@ -157,7 +157,8 @@ def get_zeroshot_dataset(args, preprocess_fn):
     dataloader = torch.utils.data.DataLoader(
         dataset,
         batch_size=args.img_batch_size,
-        num_workers=args.num_workers,
+        # num_workers=args.num_workers,
+        num_workers=0,
         sampler=None,
     )
 

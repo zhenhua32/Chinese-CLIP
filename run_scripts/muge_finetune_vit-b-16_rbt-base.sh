@@ -8,11 +8,11 @@
 # Command: bash run_scripts/muge_finetune_vit-b-16_rbt-base.sh ${DATAPATH}
 
 # Number of GPUs per GPU worker
-GPUS_PER_NODE=8 
+GPUS_PER_NODE=1
 # Number of GPU workers, for single-worker training, please set to 1
 WORKER_CNT=1
 # The ip address of the rank-0 worker, for single-worker training, please set to localhost
-export MASTER_ADDR=XX.XX.XX.XX
+export MASTER_ADDR=localhost
 # The port for communication
 export MASTER_PORT=8514
 # The rank of this worker, should be in {0, ..., WORKER_CNT-1}, for single-worker training, please set to 0
