@@ -1,3 +1,7 @@
+"""
+训练主入口
+"""
+
 from math import ceil
 import os
 import logging
@@ -37,10 +41,12 @@ def is_master(args):
 
 # used to compare the pytorch version
 def torch_version_str_compare_lessequal(version1, version2):
+    """比较版本 version1 是否小于等于 version2"""
     v1 = [int(entry) for entry in version1.split("+")[0].split(".")]
     v2 = [int(entry) for entry in version2.split("+")[0].split(".")]
     assert len(v1) == 3, "Cannot parse the version of your installed pytorch! ({})".format(version1)
     assert len(v2) == 3, "Illegal version specification ({}). Should be in 1.X.Y format.".format(version2)
+    # 升序, 所以如果 v1 <= v2 就是 true
     return sorted([v1, v2])[0] == v1
 
 
@@ -95,6 +101,7 @@ def main():
             model_info[k] = v
     model_info['use_flash_attention'] = args.use_flash_attention
 
+    # 初始化模型
     model = CLIP(**model_info)
     if args.clip_weight_path is not None:
         assert os.path.exists(args.clip_weight_path), "Pretrained CLIP weight not exists!"
@@ -202,7 +209,7 @@ def main():
     # Optionally resume from a checkpoint
     start_epoch = 0
     steps = 0
-    # Automatically restore latest checkpoint if exists
+    # Automatically restore latest checkpoint if exists. 如果有最新的检查点，则自动恢复
     if args.resume is None:
         latest_path = os.path.join(args.checkpoint_path, f"epoch_latest.pt")
         if os.path.isfile(latest_path):
@@ -224,13 +231,14 @@ def main():
             # Load the state dict
             model.load_state_dict(sd)
             # Restore the epoch and steps info, reload the dataset and dataloader for the resume epoch
+            # 如果使用了 reset_data_offset，则重新开始, 否则就继续上次的训练
             if not args.reset_data_offset:
                 start_epoch = checkpoint["epoch"]
                 steps = checkpoint["step"]
                 data = get_data(args, 
                                 epoch_id=start_epoch, 
                                 max_txt_length=args.context_length)
-            # Restore the optim state
+            # Restore the optim state 同理
             if not args.reset_optimizer and optimizer is not None:
                 optimizer.load_state_dict(checkpoint["optimizer"])
                 logging.info("=> optimizer state is restored from the checkpoint")
@@ -247,9 +255,11 @@ def main():
     # only do so if it is the 0th worker.
     args.should_save = (args.logs is not None and args.logs != '' and args.logs.lower() != 'none') and is_master(args)
 
+    # 终于开始训练了
     for epoch in range(start_epoch, args.max_epochs):
         if is_master(args) == 0:
             logging.info(f'Start epoch {epoch + 1}')
+        # 单轮的训练结果
         num_steps_this_epoch = train(model, data, epoch, optimizer, scaler, scheduler, args, steps)
         steps += num_steps_this_epoch
 
@@ -285,6 +295,7 @@ def main():
                 )
                 logging.info("Saved checkpoint {} (epoch {} @ {} steps) (writing took {} seconds)".format(save_path, epoch + 1, steps, time.time() - t1))
             
+            # 模型会保存两次, 这里是保存最新的模型
             # Save the latest params
             t1 = time.time()
             save_path = os.path.join(args.checkpoint_path, f"epoch_latest.pt")

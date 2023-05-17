@@ -288,6 +288,9 @@ class VisualTransformer(nn.Module):
 
 
 class CLIP(nn.Module):
+    """
+    这里记录的维度以 ViT-B-16 和 RoBERTa-wwm-ext-base-chinese 为例.
+    """
     def __init__(self,
                  embed_dim: int,
                  # vision
@@ -314,6 +317,8 @@ class CLIP(nn.Module):
                  ):
         super().__init__()
 
+        # 初始化视觉模型
+        # resnet 的先不看
         if isinstance(vision_layers, (tuple, list)):
             vision_heads = vision_width * 32 // vision_head_width
             self.visual = ModifiedResNet(
@@ -324,42 +329,50 @@ class CLIP(nn.Module):
                 width=vision_width
             )
         else:
-            vision_heads = vision_width // vision_head_width
+            vision_heads = vision_width // vision_head_width  # 768 / 64 = 12
             self.visual = VisualTransformer(
-                input_resolution=image_resolution,
-                patch_size=vision_patch_size,
-                width=vision_width,
-                layers=vision_layers,
-                heads=vision_heads,
-                output_dim=embed_dim,
+                input_resolution=image_resolution,  # 224
+                patch_size=vision_patch_size,  # 16
+                width=vision_width,  # 768
+                layers=vision_layers,  # 12
+                heads=vision_heads,  # 12
+                output_dim=embed_dim,  # 512
                 use_flash_attention=use_flash_attention
             )
 
+        # 初始化语言模型
         self.bert_config = BertConfig(
-            vocab_size_or_config_json_file=vocab_size,
-            hidden_size=text_hidden_size,
-            num_hidden_layers=text_num_hidden_layers,
-            num_attention_heads=text_num_attention_heads,
-            intermediate_size=text_intermediate_size,
-            hidden_act=text_hidden_act,
-            hidden_dropout_prob=text_hidden_dropout_prob,
-            attention_probs_dropout_prob=text_attention_probs_dropout_prob,
-            max_position_embeddings=text_max_position_embeddings,
-            type_vocab_size=text_type_vocab_size,
-            initializer_range=text_initializer_range,
+            vocab_size_or_config_json_file=vocab_size,  # 21128
+            hidden_size=text_hidden_size,  # 768
+            num_hidden_layers=text_num_hidden_layers,  # 12
+            num_attention_heads=text_num_attention_heads,  # 12
+            intermediate_size=text_intermediate_size,  # 3072
+            hidden_act=text_hidden_act,  # gelu
+            hidden_dropout_prob=text_hidden_dropout_prob,  # 0.1
+            attention_probs_dropout_prob=text_attention_probs_dropout_prob,  # 0.1
+            max_position_embeddings=text_max_position_embeddings,  # 512
+            type_vocab_size=text_type_vocab_size,  # 2
+            initializer_range=text_initializer_range,  #  0.02
             layer_norm_eps=1e-12,
             use_flash_attention=use_flash_attention
         )
         self.bert = BertModel(self.bert_config)
 
+        # 文本投射层, 768 => 512
         self.text_projection = nn.Parameter(torch.empty(text_hidden_size, embed_dim))
+        # logits 缩放, 是个可学习的参数. 是个温度参数. 初始是 2.659
         self.logit_scale = nn.Parameter(torch.ones([]) * np.log(1 / 0.07))
 
+        # 分词器
         self.tokenizer = tokenizer
 
+        # 初始化参数
         self.initialize_parameters()
 
     def initialize_parameters(self):
+        """
+        初始化参数
+        """
         self.logit_scale = nn.Parameter(torch.ones([]) * np.log(1 / 0.07))
 
         if isinstance(self.visual, ModifiedResNet):
@@ -375,6 +388,7 @@ class CLIP(nn.Module):
                     if name.endswith("bn3.weight"):
                         nn.init.zeros_(param)
 
+        # 初始化文本投射层
         if self.text_projection is not None:
             nn.init.normal_(self.text_projection, std=self.bert_config.hidden_size ** -0.5)
 
@@ -388,18 +402,32 @@ class CLIP(nn.Module):
         return self.visual.conv1.weight.dtype
 
     def encode_image(self, image, mask_ratio=0):
+        """
+        编码图片
+        """
         if isinstance(self.visual, ModifiedResNet):
             # mask_ratio > 0 (FLIP strategy) is currently only implemented for VisualTransformer.
             return self.visual(image.type(self.dtype))
         return self.visual(image.type(self.dtype), mask_ratio)
 
     def encode_text(self, text):
+        """
+        编码文本
+        """
         pad_index = self.tokenizer.vocab['[PAD]']
+        # 获取 attention mask. text.ne 应该是指 text != pad_index 的都是 1
         attn_mask = text.ne(pad_index).type(self.dtype)
-        x = self.bert(text, attention_mask=attn_mask)[0].type(self.dtype) # [batch_size, seq_length, hidden_size]
+        x = self.bert(text, attention_mask=attn_mask)[0].type(self.dtype)  # [batch_size, seq_length, hidden_size]
+        # x[:, 0, :] 是取第一个 token 的输出, shape 是 [batch_size, hidden_size]. @ 是矩阵乘法
+        # 最终的 shape 是 [batch_size, embed_dim]
         return x[:, 0, :] @ self.text_projection
 
     def forward(self, image, text, mask_ratio=0):
+        """
+        看下前向传播的过程
+        image shape 是 (batch_size, 3, 224, 224)
+        text shape 是 (batch_size, seq_length)  seq_length 默认是 52
+        """
         assert image is not None or text is not None, "text and image cannot both be None!"
 
         if image is None:
@@ -409,12 +437,18 @@ class CLIP(nn.Module):
         image_features = self.encode_image(image, mask_ratio)
         text_features = self.encode_text(text)
 
+        # 归一化
         image_features = image_features / image_features.norm(dim=-1, keepdim=True)
         text_features = text_features / text_features.norm(dim=-1, keepdim=True)
 
         return image_features, text_features, self.logit_scale.exp()
 
     def get_similarity(self, image, text):
+        """
+        获取相似度
+        image shape 是 (batch_size, 3, 224, 224)
+        text shape 是 (batch_size, seq_length)  seq_length 默认是 52
+        """
         image_features = self.encode_image(image)
         text_features = self.encode_text(text)
 
@@ -424,7 +458,11 @@ class CLIP(nn.Module):
 
         # cosine similarity as logits
         logit_scale = self.logit_scale.exp()
+        # shape 是 (image_batch_size, text_batch_size)
+        # 每一行是一张图片, 意思就是一个图片和所有的文本的相似度
         logits_per_image = logit_scale * image_features @ text_features.t()
+        # shape 是 (text_batch_size, image_batch_size)
+        # 每一行是一个文本, 意思就是一个文本和所有的图片的相似度
         logits_per_text = logits_per_image.t()
 
         # shape = [global_batch_size, global_batch_size]
