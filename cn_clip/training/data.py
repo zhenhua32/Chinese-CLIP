@@ -124,12 +124,18 @@ class LMDBDataset(Dataset):
 
 
 def pad_dataset(dataset, global_batch_size):
+    """
+    填充 lmdb 数据集，使其可以被 global_batch_size 整除
+    """
     # edit dataset.__len__() of the dataset
     dataset.dataset_len = ceil(dataset.dataset_len / global_batch_size) * global_batch_size
     dataset.global_batch_size = global_batch_size
 
 
 def fetch_resolution(vision_model):
+    """
+    从模型的配置中读取图片的分辨率
+    """
     # fetch the resolution from the vision model config
     vision_model_config_file = (
         Path(__file__).parent.parent / f"clip/model_configs/{vision_model.replace('/', '-')}.json"
@@ -148,6 +154,13 @@ class DataInfo:
 
 
 def get_dataset(args, is_train, max_txt_length=64, epoch_id=0):
+    """
+    获取数据集
+    args: 是一个命名空间，包含了所有的参数
+    is_train: 是否是训练集
+    max_txt_length: 文本的最大长度
+    epoch_id: epoch 的顺序
+    """
     if is_train:
         db_path = args.train_data
     else:
@@ -165,15 +178,18 @@ def get_dataset(args, is_train, max_txt_length=64, epoch_id=0):
     # pad the dataset splits using the beginning samples in the LMDB files
     # to make the number of samples enough for a full final global batch
     batch_size = args.batch_size if is_train else args.valid_batch_size
+    # 总的 batch size
     global_batch_size = batch_size * torch.distributed.get_world_size()
     pad_dataset(dataset, global_batch_size)
 
+    # 样本数
     num_samples = dataset.dataset_len
     # Update in 22.12.11: We have changed the **validation** dataset sampler during finetuning
     # from sequential to shuffled (in a determistic order between experiments and epochs).
     # This is to avoid there being one text matching multiple images (or vice versa) in a local batch
     # which will affect the correctness of computing the validation in-batch accuracy.
     sampler = DistributedSampler(dataset, shuffle=True, seed=args.seed)
+    # 分布式采样器在每轮的时候要设置 epoch, 让每轮使用不同的采样顺序
     sampler.set_epoch(epoch_id if is_train else 0)
 
     dataloader = DataLoader(
@@ -185,6 +201,7 @@ def get_dataset(args, is_train, max_txt_length=64, epoch_id=0):
         sampler=sampler,
     )
 
+    # 需要更新样本数, 保证能整除. 并更新 batch 数量
     dataloader.num_samples = num_samples
     assert num_samples % dataset.global_batch_size == 0
     dataloader.num_batches = num_samples // dataset.global_batch_size

@@ -31,11 +31,25 @@ https://github.com/pytorch/examples/issues/526
 *这个不能看训练过程中的准确率.*
 
 ```log
+# 这是在 batch_size=128, valid_batch_size=128, lr=5e-5 下的结果.
 2023-05-16,01:32:35 | INFO | Rank 0 | Validation Result (epoch 3 @ 5868 steps) | Valid Loss: 0.596188 | Image2Text Acc: 82.87 | Text2Image Acc: 82.41 | logit_scale: 4.586 | Valid Batch Size: 128
 ```
 
 默认配置的总batch_size 是 128 per-GPU * 8 GPU, lr 是 5e-5.
-notebook 中的 batch_size 是 48, lr 是 6e-6.
+notebook 中的 batch_size 是 48, lr 是 6e-6. 要求的显存大小是 8GB.
+我用 3090 的 24 GB 显存下, batch_size 最大能到 160.
+
+有个参数选项是 `--accum-freq=1` 指定梯度累计频率, 用来模拟更大的 batch_size.
+
+> accum-freq: 梯度累积频率，默认为1。指定为大于1的整数时开启对比学习梯度累积，模拟更大的batch size。如果单卡batch size为m，则总的batch size为accum_freq * m * GPU数。
+
+有个加速方式是使用 `use-flash-attention`, 但是 v100 不支持. 我也装不上, 但是是扯上编译的, 就不要在 Windows 下进行.
+
+```bash
+# 装不上
+pip install flash-attn==1.0.5 -i https://pypi.org/simple
+```
+
 
 ---
 
