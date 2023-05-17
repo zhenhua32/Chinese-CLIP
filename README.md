@@ -24,6 +24,19 @@ pip install -e .
 https://github.com/pytorch/examples/issues/526
 
 
+# 调参
+
+> 请注意finetune中间给出的验证集准确率，是验证集batch内部，图文对之间的Recall@1正确率，与比赛指标要求的从整个验证集/测试集图片池召回的Recall@1并不是同一个指标。这里仅用于观察训练趋势，如果要评测模型效果，请完整运行下文的特征提取、KNN召回和计算Recall流程
+
+*这个不能看训练过程中的准确率.*
+
+```log
+2023-05-16,01:32:35 | INFO | Rank 0 | Validation Result (epoch 3 @ 5868 steps) | Valid Loss: 0.596188 | Image2Text Acc: 82.87 | Text2Image Acc: 82.41 | logit_scale: 4.586 | Valid Batch Size: 128
+```
+
+默认配置的总batch_size 是 128 per-GPU * 8 GPU, lr 是 5e-5.
+notebook 中的 batch_size 是 48, lr 是 6e-6.
+
 ---
 
 [**中文说明**](README.md) | [**English**](README_En.md)

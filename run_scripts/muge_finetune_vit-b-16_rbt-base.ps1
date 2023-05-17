@@ -117,3 +117,5 @@ $text_model = "--text-model=${text_model}"
           $vision_model `
           $use_augment `
           $text_model
+
+# 输出是 python -m torch.distributed.launch --use_env --nproc_per_node=1 --nnodes=1 --node_rank=0 --master_addr=localhost --master_port=8514 cn_clip/training/main.py --train-data=./datapath/datasets/MUGE/lmdb/train --val-data=./datapath/datasets/MUGE/lmdb/valid --resume=./datapath/pretrained_weights/clip_cn_vit-b-16.pt --reset-data-offset --reset-optimizer --logs=./datapath/experiments/ --name=muge_finetune_vit-b-16_roberta-base_bs128_1gpu --save-step-frequency=999999 --save-epoch-frequency=1 --log-interval=1 --report-training-batch-acc --context-length=52 --warmup=100 --batch-size=128 --valid-batch-size=128 --valid-step-interval=150 --valid-epoch-interval=1 --accum-freq=1 --lr=5E-05 --wd=0.001 --max-epochs=3 --vision-model=ViT-B-16 --use-augment --text-model=RoBERTa-wwm-ext-base-chinese
