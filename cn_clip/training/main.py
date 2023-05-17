@@ -74,9 +74,9 @@ def main():
     if is_master(args):
         for dirname in [args.checkpoint_path]:
             if dirname:
-                os.makedirs(dirname, exist_ok=True)    
+                os.makedirs(dirname, exist_ok=True)
 
-    assert args.precision in ['amp', 'fp16', 'fp32']
+    assert args.precision in ["amp", "fp16", "fp32"]
 
     # Set logger
     args.log_level = logging.DEBUG if args.debug else logging.INFO
@@ -85,21 +85,25 @@ def main():
     setup_worker_logging(args.rank, log_queue, args.log_level)
 
     # Build the CLIP model
-    vision_model_config_file = Path(__file__).parent.parent / f"clip/model_configs/{args.vision_model.replace('/', '-')}.json"
-    print('Loading vision model config from', vision_model_config_file)
+    vision_model_config_file = (
+        Path(__file__).parent.parent / f"clip/model_configs/{args.vision_model.replace('/', '-')}.json"
+    )
+    print("Loading vision model config from", vision_model_config_file)
     assert os.path.exists(vision_model_config_file)
-    
-    text_model_config_file = Path(__file__).parent.parent / f"clip/model_configs/{args.text_model.replace('/', '-')}.json"
-    print('Loading text model config from', text_model_config_file)
+
+    text_model_config_file = (
+        Path(__file__).parent.parent / f"clip/model_configs/{args.text_model.replace('/', '-')}.json"
+    )
+    print("Loading text model config from", text_model_config_file)
     assert os.path.exists(text_model_config_file)
-    
-    with open(vision_model_config_file, 'r') as fv, open(text_model_config_file, 'r') as ft:
+
+    with open(vision_model_config_file, "r") as fv, open(text_model_config_file, "r") as ft:
         model_info = json.load(fv)
-        if isinstance(model_info['vision_layers'], str):
-            model_info['vision_layers'] = eval(model_info['vision_layers'])         
+        if isinstance(model_info["vision_layers"], str):
+            model_info["vision_layers"] = eval(model_info["vision_layers"])
         for k, v in json.load(ft).items():
             model_info[k] = v
-    model_info['use_flash_attention'] = args.use_flash_attention
+    model_info["use_flash_attention"] = args.use_flash_attention
 
     # 初始化模型
     model = CLIP(**model_info)
@@ -107,7 +111,12 @@ def main():
         assert os.path.exists(args.clip_weight_path), "Pretrained CLIP weight not exists!"
     if args.bert_weight_path is not None:
         assert os.path.exists(args.bert_weight_path), "Pretrained BERT weight not exists!"
-    load(model, clip_path=args.clip_weight_path, bert_path=args.bert_weight_path, use_flash_attention=args.use_flash_attention)
+    load(
+        model,
+        clip_path=args.clip_weight_path,
+        bert_path=args.bert_weight_path,
+        use_flash_attention=args.use_flash_attention,
+    )
 
     # See https://discuss.pytorch.org/t/valueerror-attemting-to-unscale-fp16-gradients/81372
     if args.precision == "amp" or args.precision == "fp32":
@@ -118,8 +127,9 @@ def main():
         convert_weights(model)
 
     if args.grad_checkpointing:
-        assert not torch_version_str_compare_lessequal(torch.__version__, "1.8.0"), \
-            "Currently our grad_checkpointing is not compatible with torch version <= 1.8.0."
+        assert not torch_version_str_compare_lessequal(
+            torch.__version__, "1.8.0"
+        ), "Currently our grad_checkpointing is not compatible with torch version <= 1.8.0."
         model.set_grad_checkpointing()
         logging.info("Grad-checkpointing activated.")
 
@@ -134,7 +144,7 @@ def main():
         for k, v in model.visual.named_parameters():
             v.requires_grad = False
         # freeze bn running mean and variance
-        if args.vision_model in ['RN50']:
+        if args.vision_model in ["RN50"]:
             for m in model.visual.modules():
                 if isinstance(m, torch.nn.BatchNorm2d):
                     m.eval()
@@ -143,7 +153,9 @@ def main():
     # To make compatible with torch version <= 1.8.0, set find_unused_parameters to True
     # In other cases, set find_unused_parameters to False
     find_unused_parameters = torch_version_str_compare_lessequal(torch.__version__, "1.8.0")
-    model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.local_device_rank], find_unused_parameters=find_unused_parameters)
+    model = torch.nn.parallel.DistributedDataParallel(
+        model, device_ids=[args.local_device_rank], find_unused_parameters=find_unused_parameters
+    )
     # Have to set this when activating grad checkpointing in Pytorch >= 2.0.0
     if args.grad_checkpointing and not torch_version_str_compare_lessequal(torch.__version__, "1.14.0"):
         model._set_static_graph()
@@ -151,12 +163,12 @@ def main():
     if args.precision == "fp16":
         convert_weights(model)
 
-    # Initialize dataset and dataloader
+    # Initialize dataset and dataloader 初始化数据集, 这里指定了 bert 的最大长度
     data = get_data(args, epoch_id=0, max_txt_length=args.context_length)
 
     # Initialize optimizer and lr scheduler
-    exclude = lambda n : "bn" in n or "ln" in n or "bias" in n or 'logit_scale' in n
-    include = lambda n : not exclude(n)
+    exclude = lambda n: "bn" in n or "ln" in n or "bias" in n or "logit_scale" in n
+    include = lambda n: not exclude(n)
 
     named_parameters = list(model.named_parameters())
     gain_or_bias_params = [p for n, p in named_parameters if exclude(n) and p.requires_grad]
@@ -168,7 +180,7 @@ def main():
     else:
         optimizer = optim.AdamW(
             [
-                {"params": gain_or_bias_params, "weight_decay": 0.},
+                {"params": gain_or_bias_params, "weight_decay": 0.0},
                 {"params": rest_params, "weight_decay": args.wd},
             ],
             lr=args.lr,
@@ -202,9 +214,11 @@ def main():
     logging.info(f"Use GPU: {args.local_device_rank} for training")
 
     # Note for mask_ratio
-    if is_master(args) and args.mask_ratio > 0 and args.vision_model in ['RN50']:
-        logging.info("Note: mask_ratio > 0 (FLIP strategy) is currently only implemented for VisualTransformer. " + \
-            "It will not function for ResNet backbone.")    
+    if is_master(args) and args.mask_ratio > 0 and args.vision_model in ["RN50"]:
+        logging.info(
+            "Note: mask_ratio > 0 (FLIP strategy) is currently only implemented for VisualTransformer. "
+            + "It will not function for ResNet backbone."
+        )
 
     # Optionally resume from a checkpoint
     start_epoch = 0
@@ -216,9 +230,7 @@ def main():
             args.resume = latest_path
     if args.resume is not None:
         if os.path.isfile(args.resume):
-            logging.info(
-                f"=> begin to load checkpoint '{args.resume}'"
-            )
+            logging.info(f"=> begin to load checkpoint '{args.resume}'")
             # Restore the model weight, map model to be loaded to specified single gpu.
             # loc = "cuda:{}".format(args.local_device_rank)
             checkpoint = torch.load(args.resume, map_location="cpu")
@@ -235,16 +247,12 @@ def main():
             if not args.reset_data_offset:
                 start_epoch = checkpoint["epoch"]
                 steps = checkpoint["step"]
-                data = get_data(args, 
-                                epoch_id=start_epoch, 
-                                max_txt_length=args.context_length)
+                data = get_data(args, epoch_id=start_epoch, max_txt_length=args.context_length)
             # Restore the optim state 同理
             if not args.reset_optimizer and optimizer is not None:
                 optimizer.load_state_dict(checkpoint["optimizer"])
                 logging.info("=> optimizer state is restored from the checkpoint")
-            logging.info(
-                f"=> loaded checkpoint '{args.resume}' (epoch {checkpoint['epoch']} @ {steps} steps)"
-            )
+            logging.info(f"=> loaded checkpoint '{args.resume}' (epoch {checkpoint['epoch']} @ {steps} steps)")
         else:
             logging.info("=> no checkpoint found at '{}'".format(args.resume))
 
@@ -253,17 +261,21 @@ def main():
 
     # determine if this worker should save logs and checkpoints.
     # only do so if it is the 0th worker.
-    args.should_save = (args.logs is not None and args.logs != '' and args.logs.lower() != 'none') and is_master(args)
+    args.should_save = (args.logs is not None and args.logs != "" and args.logs.lower() != "none") and is_master(args)
 
     # 终于开始训练了
     for epoch in range(start_epoch, args.max_epochs):
         if is_master(args) == 0:
-            logging.info(f'Start epoch {epoch + 1}')
+            logging.info(f"Start epoch {epoch + 1}")
         # 单轮的训练结果
         num_steps_this_epoch = train(model, data, epoch, optimizer, scaler, scheduler, args, steps)
         steps += num_steps_this_epoch
 
-        if args.val_data is not None and args.valid_epoch_interval is not None and ((epoch + 1) % args.valid_epoch_interval) == 0:
+        if (
+            args.val_data is not None
+            and args.valid_epoch_interval is not None
+            and ((epoch + 1) % args.valid_epoch_interval) == 0
+        ):
             assert "val" in data, "Error: Valid dataset has not been built."
             if not args.use_flash_attention:
                 evaluate(model, data, epoch, args, steps)
@@ -288,13 +300,19 @@ def main():
                         "epoch": epoch + 1,
                         "step": steps,
                         "name": args.name,
-                        "state_dict": model.state_dict() if not args.use_flash_attention else convert_state_dict(model.state_dict()),
+                        "state_dict": model.state_dict()
+                        if not args.use_flash_attention
+                        else convert_state_dict(model.state_dict()),
                         "optimizer": optimizer.state_dict(),
                     },
                     save_path,
                 )
-                logging.info("Saved checkpoint {} (epoch {} @ {} steps) (writing took {} seconds)".format(save_path, epoch + 1, steps, time.time() - t1))
-            
+                logging.info(
+                    "Saved checkpoint {} (epoch {} @ {} steps) (writing took {} seconds)".format(
+                        save_path, epoch + 1, steps, time.time() - t1
+                    )
+                )
+
             # 模型会保存两次, 这里是保存最新的模型
             # Save the latest params
             t1 = time.time()
@@ -304,12 +322,18 @@ def main():
                     "epoch": epoch + 1,
                     "step": steps,
                     "name": args.name,
-                    "state_dict": model.state_dict() if not args.use_flash_attention else convert_state_dict(model.state_dict()),
+                    "state_dict": model.state_dict()
+                    if not args.use_flash_attention
+                    else convert_state_dict(model.state_dict()),
                     "optimizer": optimizer.state_dict(),
                 },
                 save_path,
             )
-            logging.info("Saved checkpoint {} (epoch {} @ {} steps) (writing took {} seconds)".format(save_path, epoch + 1, steps, time.time() - t1))
+            logging.info(
+                "Saved checkpoint {} (epoch {} @ {} steps) (writing took {} seconds)".format(
+                    save_path, epoch + 1, steps, time.time() - t1
+                )
+            )
 
 
 if __name__ == "__main__":
