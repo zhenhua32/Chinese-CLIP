@@ -144,7 +144,7 @@ class LMDBDataset(Dataset):
         image = Image.open(BytesIO(base64.urlsafe_b64decode(image_b64)))  # already resized
         image = self.transform(image)
 
-        # 分词
+        # 分词. 获取的是第一个元素. tokenize 是用来批量处理文本的
         text = tokenize([_preprocess_text(raw_text)], context_length=self.max_txt_length)[0]
         eos_index = text.numpy().tolist().index(_tokenizer.vocab["[SEP]"])
         return image, text, eos_index
