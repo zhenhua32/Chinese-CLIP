@@ -25,19 +25,26 @@ from cn_clip.clip import tokenize
 
 
 def _convert_to_rgb(image):
+    """图片转换为 RGB 格式"""
     return image.convert("RGB")
 
 
 def _preprocess_text(text):
+    """文本小写后替换中文引号为英文引号"""
     # adapt the text to Chinese BERT vocab
     text = text.lower().replace("“", '"').replace("”", '"')
     return text
 
 
 class LMDBDataset(Dataset):
+    """
+    看下数据集是怎么构造的
+    """
+
     def __init__(self, lmdb_path, split="val", max_txt_length=64, use_augment=False, resolution=224):
         self.lmdb_path = lmdb_path
 
+        # 分别加载 imgs 目录和 pairs 目录
         # assert LMDB directories exist
         assert os.path.isdir(lmdb_path), "The LMDB directory {} of {} split does not exist!".format(lmdb_path, split)
         lmdb_pairs = os.path.join(lmdb_path, "pairs")
@@ -55,6 +62,7 @@ class LMDBDataset(Dataset):
         self.env_imgs = lmdb.open(lmdb_imgs, readonly=True, create=False, lock=False, readahead=False, meminit=False)
         self.txn_imgs = self.env_imgs.begin(buffers=True)
 
+        # 获取数量
         # fetch number of pairs and images
         self.number_samples = int(self.txn_pairs.get(key=b"num_samples").tobytes().decode("utf-8"))
         self.number_images = int(self.txn_imgs.get(key=b"num_images").tobytes().decode("utf-8"))
@@ -64,18 +72,23 @@ class LMDBDataset(Dataset):
 
         super(LMDBDataset, self).__init__()
 
+        # 这两个参数都是会在后续被更新的
         # the self.dataset_len will be edited to a larger value by calling pad_dataset()
         self.dataset_len = self.number_samples
         self.global_batch_size = 1  # will be modified to the exact global_batch_size after calling pad_dataset()
 
+        # 数据集的类型
         self.split = split
+        # 文本的最大长度
         self.max_txt_length = max_txt_length
 
+        # 是否使用数据增强
         self.use_augment = use_augment
         self.transform = self._build_transform(resolution)
 
     def _build_transform(self, resolution):
         if self.split == "train" and self.use_augment:
+            # 当使用数据增强时
             transform = create_transform(
                 input_size=resolution,
                 scale=(0.9, 1.0),
@@ -88,36 +101,50 @@ class LMDBDataset(Dataset):
             )
             transform = Compose(transform.transforms[:-3] + [_convert_to_rgb] + transform.transforms[-3:])
         else:
+            # 没有数据增强时, 只有一个缩放和归一化
             transform = Compose(
                 [
                     Resize((resolution, resolution), interpolation=InterpolationMode.BICUBIC),
                     _convert_to_rgb,
                     ToTensor(),
+                    # 这里三个参数是表示 RGB 的三个通道的均值和标准差
                     Normalize((0.48145466, 0.4578275, 0.40821073), (0.26862954, 0.26130258, 0.27577711)),
                 ]
             )
         return transform
 
     def __del__(self):
+        """
+        关闭 lmdb 文件
+        """
         if hasattr(self, "env_pairs"):
             self.env_pairs.close()
         if hasattr(self, "env_imgs"):
             self.env_imgs.close()
 
     def __len__(self):
+        """
+        数据集的长度
+        """
         return self.dataset_len
 
     def __getitem__(self, index):
+        """
+        根据索引获取数据
+        """
         sample_index = index % self.number_samples
 
+        # 加载数据
         pair = pickle.loads(self.txn_pairs.get("{}".format(sample_index).encode("utf-8")).tobytes())
         image_id, text_id, raw_text = pair
 
+        # 根据 image_id 获取图片
         image_b64 = self.txn_imgs.get("{}".format(image_id).encode("utf-8")).tobytes()
         image_b64 = image_b64.decode(encoding="utf8", errors="ignore")
         image = Image.open(BytesIO(base64.urlsafe_b64decode(image_b64)))  # already resized
         image = self.transform(image)
 
+        # 分词
         text = tokenize([_preprocess_text(raw_text)], context_length=self.max_txt_length)[0]
         eos_index = text.numpy().tolist().index(_tokenizer.vocab["[SEP]"])
         return image, text, eos_index
@@ -206,6 +233,7 @@ def get_dataset(args, is_train, max_txt_length=64, epoch_id=0):
     assert num_samples % dataset.global_batch_size == 0
     dataloader.num_batches = num_samples // dataset.global_batch_size
 
+    # 这挺好, 返回 4 个字段
     return DataInfo(dataloader, sampler, dataset, epoch_id)
 
 
