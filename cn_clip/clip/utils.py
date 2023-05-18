@@ -23,26 +23,11 @@ _MODELS = {
     "RN50": "https://clip-cn-beijing.oss-cn-beijing.aliyuncs.com/checkpoints/clip_cn_rn50.pt",
 }
 _MODEL_INFO = {
-    "ViT-B-16": {
-        "struct": "ViT-B-16@RoBERTa-wwm-ext-base-chinese",
-        "input_resolution": 224
-    },
-    "ViT-L-14": {
-        "struct": "ViT-L-14@RoBERTa-wwm-ext-base-chinese",
-        "input_resolution": 224
-    },
-    "ViT-L-14-336": {
-        "struct": "ViT-L-14-336@RoBERTa-wwm-ext-base-chinese",
-        "input_resolution": 336
-    },
-    "ViT-H-14": {
-        "struct": "ViT-H-14@RoBERTa-wwm-ext-large-chinese",
-        "input_resolution": 224
-    },
-    "RN50": {
-        "struct": "RN50@RBT3-chinese",
-        "input_resolution": 224
-    },
+    "ViT-B-16": {"struct": "ViT-B-16@RoBERTa-wwm-ext-base-chinese", "input_resolution": 224},
+    "ViT-L-14": {"struct": "ViT-L-14@RoBERTa-wwm-ext-base-chinese", "input_resolution": 224},
+    "ViT-L-14-336": {"struct": "ViT-L-14-336@RoBERTa-wwm-ext-base-chinese", "input_resolution": 336},
+    "ViT-H-14": {"struct": "ViT-H-14@RoBERTa-wwm-ext-large-chinese", "input_resolution": 224},
+    "RN50": {"struct": "RN50@RBT3-chinese", "input_resolution": 224},
 }
 
 
@@ -59,8 +44,9 @@ def _download(url: str, root: str):
         return download_target
 
     with urllib.request.urlopen(url) as source, open(download_target, "wb") as output:
-        with tqdm(total=int(source.info().get("Content-Length")), ncols=80, unit='iB', unit_scale=True,
-                  unit_divisor=1024) as loop:
+        with tqdm(
+            total=int(source.info().get("Content-Length")), ncols=80, unit="iB", unit_scale=True, unit_divisor=1024
+        ) as loop:
             while True:
                 buffer = source.read(8192)
                 if not buffer:
@@ -81,19 +67,27 @@ def available_models() -> List[str]:
     return list(_MODELS.keys())
 
 
-def load_from_name(name: str, device: Union[str, torch.device] = "cuda" if torch.cuda.is_available() else "cpu",
-                   download_root: str = None, vision_model_name: str = None, text_model_name: str = None, input_resolution: int = None):
+def load_from_name(
+    name: str,
+    device: Union[str, torch.device] = "cuda" if torch.cuda.is_available() else "cpu",
+    download_root: str = None,
+    vision_model_name: str = None,
+    text_model_name: str = None,
+    input_resolution: int = None,
+):
     if name in _MODELS:
         model_path = _download(_MODELS[name], download_root or os.path.expanduser("~/.cache/clip"))
-        model_name, model_input_resolution = _MODEL_INFO[name]['struct'], _MODEL_INFO[name]['input_resolution']
+        model_name, model_input_resolution = _MODEL_INFO[name]["struct"], _MODEL_INFO[name]["input_resolution"]
     elif os.path.isfile(name):
-        assert vision_model_name and text_model_name and input_resolution, "Please specify specific 'vision_model_name', 'text_model_name', and 'input_resolution'"
+        assert (
+            vision_model_name and text_model_name and input_resolution
+        ), "Please specify specific 'vision_model_name', 'text_model_name', and 'input_resolution'"
         model_path = name
-        model_name, model_input_resolution = f'{vision_model_name}@{text_model_name}', input_resolution
+        model_name, model_input_resolution = f"{vision_model_name}@{text_model_name}", input_resolution
     else:
         raise RuntimeError(f"Model {name} not found; available models = {available_models()}")
 
-    with open(model_path, 'rb') as opened_file:
+    with open(model_path, "rb") as opened_file:
         # loading saved checkpoint
         checkpoint = torch.load(opened_file, map_location="cpu")
 
@@ -105,10 +99,14 @@ def load_from_name(name: str, device: Union[str, torch.device] = "cuda" if torch
     return model, image_transform(model_input_resolution)
 
 
-def load(model, device: Union[str, torch.device] = "cuda" if torch.cuda.is_available() else "cpu", clip_path=None,
-         bert_path=None, use_flash_attention=False):
-    """Load CLIP and BERT model weights
-    """
+def load(
+    model,
+    device: Union[str, torch.device] = "cuda" if torch.cuda.is_available() else "cpu",
+    clip_path=None,
+    bert_path=None,
+    use_flash_attention=False,
+):
+    """Load CLIP and BERT model weights"""
 
     bert_state_dict = torch.load(bert_path, map_location="cpu") if bert_path else None
     clip_state_dict = torch.load(clip_path, map_location="cpu") if clip_path else None
@@ -122,6 +120,7 @@ def load(model, device: Union[str, torch.device] = "cuda" if torch.cuda.is_avail
 
 def tokenize(texts: Union[str, List[str]], context_length: int = 52) -> torch.LongTensor:
     """
+    分词函数, 具体的功能是由 _tokenizer 完成的
     Returns the tokenized representation of given input string(s)
     Parameters
     ----------
@@ -138,57 +137,62 @@ def tokenize(texts: Union[str, List[str]], context_length: int = 52) -> torch.Lo
 
     all_tokens = []
     for text in texts:
-        all_tokens.append([_tokenizer.vocab['[CLS]']] + _tokenizer.convert_tokens_to_ids(_tokenizer.tokenize(text))[
-                                                        :context_length - 2] + [_tokenizer.vocab['[SEP]']])
+        all_tokens.append(
+            [_tokenizer.vocab["[CLS]"]]
+            + _tokenizer.convert_tokens_to_ids(_tokenizer.tokenize(text))[: context_length - 2]
+            + [_tokenizer.vocab["[SEP]"]]
+        )
 
+    # zero padding, 第一个元素就是 [PAD]
     result = torch.zeros(len(all_tokens), context_length, dtype=torch.long)
 
     for i, tokens in enumerate(all_tokens):
         assert len(tokens) <= context_length
-        result[i, :len(tokens)] = torch.tensor(tokens)
+        result[i, : len(tokens)] = torch.tensor(tokens)
 
+    # 返回的是 tensor, shape = [number of input strings, context_length]
     return result
 
 
 def _convert_to_rgb(image):
-    return image.convert('RGB')
+    return image.convert("RGB")
 
 
 def image_transform(image_size=224):
-    transform = Compose([
-        Resize((image_size, image_size), interpolation=InterpolationMode.BICUBIC),
-        _convert_to_rgb,
-        ToTensor(),
-        Normalize((0.48145466, 0.4578275, 0.40821073), (0.26862954, 0.26130258, 0.27577711)),
-    ])
+    transform = Compose(
+        [
+            Resize((image_size, image_size), interpolation=InterpolationMode.BICUBIC),
+            _convert_to_rgb,
+            ToTensor(),
+            Normalize((0.48145466, 0.4578275, 0.40821073), (0.26862954, 0.26130258, 0.27577711)),
+        ]
+    )
     return transform
 
 
 def create_model(model_name, checkpoint=None):
-    vision_model, text_model = model_name.split('@')
+    vision_model, text_model = model_name.split("@")
     # Initialize the model.
-    vision_model_config_file = Path(
-        __file__).parent / f"model_configs/{vision_model.replace('/', '-')}.json"
-    print('Loading vision model config from', vision_model_config_file)
+    vision_model_config_file = Path(__file__).parent / f"model_configs/{vision_model.replace('/', '-')}.json"
+    print("Loading vision model config from", vision_model_config_file)
     assert os.path.exists(vision_model_config_file)
 
-    text_model_config_file = Path(
-        __file__).parent / f"model_configs/{text_model.replace('/', '-')}.json"
-    print('Loading text model config from', text_model_config_file)
+    text_model_config_file = Path(__file__).parent / f"model_configs/{text_model.replace('/', '-')}.json"
+    print("Loading text model config from", text_model_config_file)
     assert os.path.exists(text_model_config_file)
 
-    with open(vision_model_config_file, 'r') as fv, open(text_model_config_file, 'r') as ft:
+    with open(vision_model_config_file, "r") as fv, open(text_model_config_file, "r") as ft:
         model_info = json.load(fv)
         for k, v in json.load(ft).items():
             model_info[k] = v
-    if isinstance(model_info['vision_layers'], str):
-        model_info['vision_layers'] = eval(model_info['vision_layers'])
-    print('Model info', model_info)
+    if isinstance(model_info["vision_layers"], str):
+        model_info["vision_layers"] = eval(model_info["vision_layers"])
+    print("Model info", model_info)
     model = CLIP(**model_info)
     convert_weights(model)
     if checkpoint:
         sd = checkpoint["state_dict"]
-        if next(iter(sd.items()))[0].startswith('module'):
-            sd = {k[len('module.'):]: v for k, v in sd.items() if "bert.pooler" not in k}
+        if next(iter(sd.items()))[0].startswith("module"):
+            sd = {k[len("module.") :]: v for k, v in sd.items() if "bert.pooler" not in k}
         model.load_state_dict(sd)
     return model
