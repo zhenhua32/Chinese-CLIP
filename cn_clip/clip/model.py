@@ -228,21 +228,32 @@ class Transformer(nn.Module):
 
 
 class VisualTransformer(nn.Module):
+    """
+    看一看吧, 都还没看过 vit
+    """
     def __init__(self, input_resolution: int, patch_size: int, width: int, layers: int, heads: int, output_dim: int, use_flash_attention: bool = False):
+        """
+        假设 input_resolution = 224, patch_size = 16, width = 768, layers = 12, heads = 12, output_dim = 512
+        """
         super().__init__()
         self.input_resolution = input_resolution
+        # grid_size = (14, 14)
         self.grid_size = (self.input_resolution // patch_size, self.input_resolution // patch_size)
         self.output_dim = output_dim
         self.conv1 = nn.Conv2d(in_channels=3, out_channels=width, kernel_size=patch_size, stride=patch_size, bias=False)
 
+        # scale = 1 / sqrt(768)
         scale = width ** -0.5
+        # class_embedding 的 shape 是 (768, ). class_embedding 是第一个 token, 用来表示图片的类别
         self.class_embedding = nn.Parameter(scale * torch.randn(width))
+        # positional_embedding 的 shape 是 (196 + 1, 768)
         self.positional_embedding = nn.Parameter(scale * torch.randn((input_resolution // patch_size) ** 2 + 1, width))
         self.ln_pre = LayerNorm(width)
 
         self.transformer = Transformer(width, layers, heads, use_flash_attention=use_flash_attention)
 
         self.ln_post = LayerNorm(width)
+        # proj 的 shape 是 (768, 512)
         self.proj = nn.Parameter(scale * torch.randn(width, output_dim))
 
     @torch.jit.ignore
@@ -266,21 +277,39 @@ class VisualTransformer(nn.Module):
         return x_masked_add
 
     def forward(self, x: torch.Tensor, mask_ratio: float = 0.0):
+        """
+        看看前向传播的过程
+        x 的 shape 是 (batch_size, 3, 224, 224)
+        """
+        # x 的 shape 是 (batch_size, 768, 14, 14)
         x = self.conv1(x)  # shape = [*, width, grid, grid]
+        # x 的 shape 是 (batch_size, 768, 196)
         x = x.reshape(x.shape[0], x.shape[1], -1)  # shape = [*, width, grid ** 2]
+        # x 的 shape 是 (batch_size, 196, 768)
         x = x.permute(0, 2, 1)  # shape = [*, grid ** 2, width]
+        # x 的 shape 是 (batch_size, 197, 768). 这是在叠加第一个位置的 token
+        # self.class_embedding 的 shape 是 (768,), 通过叠加一个 zeros 的 (batch_size, 1, 768) 的 tensor, 来复制 class_embedding
+        # 就变成了 (batch_size, 1, 768) + (batch_size, 196, 768) = (batch_size, 197, 768
         x = torch.cat([self.class_embedding.to(x.dtype) + torch.zeros(x.shape[0], 1, x.shape[-1], dtype=x.dtype, device=x.device), x], dim=1)  # shape = [*, grid ** 2 + 1, width]
+        # x 的 shape 是 (batch_size, 197, 768). 添加位置编码
         x = x + self.positional_embedding.to(x.dtype)
+        # x 的 shape 是 (batch_size, 197, 768), 是怎么理解的, 197 是序列长度, 768 是特征维度, 类比于 bert
+        # TODO: 随机掩码, 没看
         if mask_ratio != 0:
             x = self.random_masking(x, mask_ratio)
+        # 经过 LayerNorm
         x = self.ln_pre(x)
 
+        # x 的 shape 是  (197, batch_size, 768). 不理解 NLD 的缩写是啥意思
         x = x.permute(1, 0, 2)  # NLD -> LND
         x = self.transformer(x)
+        # x 的 shape 是 (batch_size, 197, 768)
         x = x.permute(1, 0, 2)  # LND -> NLD
 
+        # x 的 shape 是 (batch_size, 768). 只对第一个 token 做了 LayerNorm
         x = self.ln_post(x[:, 0, :])
 
+        # x 的 shape 是 (batch_size, 512). 做一个线性变换
         if self.proj is not None:
             x = x @ self.proj
 
