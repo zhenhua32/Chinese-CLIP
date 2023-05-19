@@ -90,6 +90,9 @@ def freeze_vision_bn(args, model):
 
 
 def train(model, data, epoch, optimizer, scaler, scheduler, args, global_trained_steps):
+    """
+    TODO: 还没看过训练流程
+    """
     # os.environ["WDS_EPOCH"] = str(epoch)
 
     model.train()

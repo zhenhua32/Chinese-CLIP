@@ -12,8 +12,9 @@ from torch import nn
 from torch.utils.checkpoint import checkpoint
 
 import importlib.util
-if importlib.util.find_spec('flash_attn'):
-    FlashMHA = importlib.import_module('flash_attn.flash_attention').FlashMHA
+
+if importlib.util.find_spec("flash_attn"):
+    FlashMHA = importlib.import_module("flash_attn.flash_attention").FlashMHA
 
 from cn_clip.clip import _tokenizer
 from cn_clip.clip.configuration_bert import BertConfig
@@ -44,11 +45,15 @@ class Bottleneck(nn.Module):
 
         if stride > 1 or inplanes != planes * Bottleneck.expansion:
             # downsampling layer is prepended with an avgpool, and the subsequent convolution has stride 1
-            self.downsample = nn.Sequential(OrderedDict([
-                ("-1", nn.AvgPool2d(stride)),
-                ("0", nn.Conv2d(inplanes, planes * self.expansion, 1, stride=1, bias=False)),
-                ("1", nn.BatchNorm2d(planes * self.expansion))
-            ]))
+            self.downsample = nn.Sequential(
+                OrderedDict(
+                    [
+                        ("-1", nn.AvgPool2d(stride)),
+                        ("0", nn.Conv2d(inplanes, planes * self.expansion, 1, stride=1, bias=False)),
+                        ("1", nn.BatchNorm2d(planes * self.expansion)),
+                    ]
+                )
+            )
 
     def forward(self, x: torch.Tensor):
         identity = x
@@ -69,7 +74,7 @@ class Bottleneck(nn.Module):
 class AttentionPool2d(nn.Module):
     def __init__(self, spacial_dim: int, embed_dim: int, num_heads: int, output_dim: int = None):
         super().__init__()
-        self.positional_embedding = nn.Parameter(torch.randn(spacial_dim ** 2 + 1, embed_dim) / embed_dim ** 0.5)
+        self.positional_embedding = nn.Parameter(torch.randn(spacial_dim**2 + 1, embed_dim) / embed_dim**0.5)
         self.k_proj = nn.Linear(embed_dim, embed_dim)
         self.q_proj = nn.Linear(embed_dim, embed_dim)
         self.v_proj = nn.Linear(embed_dim, embed_dim)
@@ -81,7 +86,9 @@ class AttentionPool2d(nn.Module):
         x = torch.cat([x.mean(dim=0, keepdim=True), x], dim=0)  # (HW+1)NC
         x = x + self.positional_embedding[:, None, :].to(x.dtype)  # (HW+1)NC
         x, _ = F.multi_head_attention_forward(
-            query=x, key=x, value=x,
+            query=x,
+            key=x,
+            value=x,
             embed_dim_to_check=x.shape[-1],
             num_heads=self.num_heads,
             q_proj_weight=self.q_proj.weight,
@@ -97,7 +104,7 @@ class AttentionPool2d(nn.Module):
             out_proj_bias=self.c_proj.bias,
             use_separate_proj_weight=True,
             training=self.training,
-            need_weights=False
+            need_weights=False,
         )
 
         return x[0]
@@ -183,16 +190,28 @@ class QuickGELU(nn.Module):
 
 
 class ResidualAttentionBlock(nn.Module):
+    """
+    单层网络, 表示 transformer 中的一个 block
+    """
     def __init__(self, d_model: int, n_head: int, attn_mask: torch.Tensor = None, use_flash_attention: bool = False):
+        """
+        假设 d_model = 768, n_head = 12
+        """
         super().__init__()
 
+        # 多头注意力层. 可以看看 pytorch 的实现
         self.attn = nn.MultiheadAttention(d_model, n_head) if not use_flash_attention else FlashMHA(d_model, n_head)
         self.ln_1 = LayerNorm(d_model)
-        self.mlp = nn.Sequential(OrderedDict([
-            ("c_fc", nn.Linear(d_model, d_model * 4)),
-            ("gelu", QuickGELU()),
-            ("c_proj", nn.Linear(d_model * 4, d_model))
-        ]))
+        self.mlp = nn.Sequential(
+            OrderedDict(
+                [
+                    # 先从 768 -> 3072, 然后再从 3072 -> 768
+                    ("c_fc", nn.Linear(d_model, d_model * 4)),
+                    ("gelu", QuickGELU()),
+                    ("c_proj", nn.Linear(d_model * 4, d_model)),
+                ]
+            )
+        )
         self.ln_2 = LayerNorm(d_model)
         self.attn_mask = attn_mask
         self.use_flash_attention = use_flash_attention
@@ -203,27 +222,42 @@ class ResidualAttentionBlock(nn.Module):
             # Batch first is needed for FlashAttention. See https://github.com/HazyResearch/flash-attention/issues/84 for more information.
             return self.attn(x.transpose(1, 0))[0].transpose(1, 0)
         else:
+            # 先看这里. 他的输入是 (query, key, value), 自注意力机制中, query, key, value 都是同一个 x
             return self.attn(x, x, x, need_weights=False, attn_mask=self.attn_mask)[0]
 
     def forward(self, x: torch.Tensor):
+        """
+        前向传播
+        """
+        # x + 是指残差连接. ln_1 会先对输入 x 进行归一化, 然后进入 attention 层.
         x = x + self.attention(self.ln_1(x))
+        # mlp 是一个两层的全连接网络, 用于对 attention 层的输出进行处理
         x = x + self.mlp(self.ln_2(x))
         return x
 
 
 class Transformer(nn.Module):
-    def __init__(self, width: int, layers: int, heads: int, attn_mask: torch.Tensor = None, use_flash_attention: bool = False):
+    def __init__(
+        self, width: int, layers: int, heads: int, attn_mask: torch.Tensor = None, use_flash_attention: bool = False
+    ):
+        """
+        假设 width = 768, layers = 12, heads = 12
+        """
         super().__init__()
         self.width = width
         self.layers = layers
         self.grad_checkpointing = False
-        self.resblocks = nn.Sequential(*[ResidualAttentionBlock(width, heads, attn_mask, use_flash_attention) for _ in range(layers)])
+        # 构建 12 层的 transformer
+        self.resblocks = nn.Sequential(
+            *[ResidualAttentionBlock(width, heads, attn_mask, use_flash_attention) for _ in range(layers)]
+        )
 
     def forward(self, x: torch.Tensor):
+        # 使用检查点技术, 降低显存占用, 但是会加重计算量
         if self.grad_checkpointing and not torch.jit.is_scripting():
             for r in self.resblocks:
                 x = checkpoint(r, x)
-            return x        
+            return x
         return self.resblocks(x)
 
 
@@ -231,7 +265,17 @@ class VisualTransformer(nn.Module):
     """
     看一看吧, 都还没看过 vit
     """
-    def __init__(self, input_resolution: int, patch_size: int, width: int, layers: int, heads: int, output_dim: int, use_flash_attention: bool = False):
+
+    def __init__(
+        self,
+        input_resolution: int,
+        patch_size: int,
+        width: int,
+        layers: int,
+        heads: int,
+        output_dim: int,
+        use_flash_attention: bool = False,
+    ):
         """
         假设 input_resolution = 224, patch_size = 16, width = 768, layers = 12, heads = 12, output_dim = 512
         """
@@ -243,7 +287,7 @@ class VisualTransformer(nn.Module):
         self.conv1 = nn.Conv2d(in_channels=3, out_channels=width, kernel_size=patch_size, stride=patch_size, bias=False)
 
         # scale = 1 / sqrt(768)
-        scale = width ** -0.5
+        scale = width**-0.5
         # class_embedding 的 shape 是 (768, ). class_embedding 是第一个 token, 用来表示图片的类别
         self.class_embedding = nn.Parameter(scale * torch.randn(width))
         # positional_embedding 的 shape 是 (196 + 1, 768)
@@ -265,8 +309,7 @@ class VisualTransformer(nn.Module):
         len_keep = int((L - 1) * (1 - mask_ratio))
 
         noise = torch.rand(N, L - 1, device=x.device)
-        ids_shuffle = torch.argsort(noise, dim=1) + torch.ones(N, L - 1, device=x.device,
-                                                               dtype=int)
+        ids_shuffle = torch.argsort(noise, dim=1) + torch.ones(N, L - 1, device=x.device, dtype=int)
         ids_keep = ids_shuffle[:, :len_keep]
 
         x_masked = torch.gather(x, dim=1, index=ids_keep.unsqueeze(-1).repeat(1, 1, D))
@@ -290,7 +333,14 @@ class VisualTransformer(nn.Module):
         # x 的 shape 是 (batch_size, 197, 768). 这是在叠加第一个位置的 token
         # self.class_embedding 的 shape 是 (768,), 通过叠加一个 zeros 的 (batch_size, 1, 768) 的 tensor, 来复制 class_embedding
         # 就变成了 (batch_size, 1, 768) + (batch_size, 196, 768) = (batch_size, 197, 768
-        x = torch.cat([self.class_embedding.to(x.dtype) + torch.zeros(x.shape[0], 1, x.shape[-1], dtype=x.dtype, device=x.device), x], dim=1)  # shape = [*, grid ** 2 + 1, width]
+        x = torch.cat(
+            [
+                self.class_embedding.to(x.dtype)
+                + torch.zeros(x.shape[0], 1, x.shape[-1], dtype=x.dtype, device=x.device),
+                x,
+            ],
+            dim=1,
+        )  # shape = [*, grid ** 2 + 1, width]
         # x 的 shape 是 (batch_size, 197, 768). 添加位置编码
         x = x + self.positional_embedding.to(x.dtype)
         # x 的 shape 是 (batch_size, 197, 768), 是怎么理解的, 197 是序列长度, 768 是特征维度, 类比于 bert
@@ -320,30 +370,32 @@ class CLIP(nn.Module):
     """
     这里记录的维度以 ViT-B-16 和 RoBERTa-wwm-ext-base-chinese 为例.
     """
-    def __init__(self,
-                 embed_dim: int,
-                 # vision
-                 image_resolution: int,
-                 vision_layers: Union[Tuple[int, int, int, int], int],
-                 vision_width: int,
-                 vision_patch_size: int,
-                 # text
-                 vocab_size: int,
-                 text_attention_probs_dropout_prob: float, 
-                 text_hidden_act: str, 
-                 text_hidden_dropout_prob: float, 
-                 text_hidden_size: int,
-                 text_initializer_range: float, 
-                 text_intermediate_size: int, 
-                 text_max_position_embeddings: int, 
-                 text_num_attention_heads: int, 
-                 text_num_hidden_layers: int, 
-                 text_type_vocab_size: int,
-                 tokenizer = _tokenizer,
-                 # vision head width, added this param for ViT-H
-                 vision_head_width: int = 64,
-                 use_flash_attention: bool = False,
-                 ):
+
+    def __init__(
+        self,
+        embed_dim: int,
+        # vision
+        image_resolution: int,
+        vision_layers: Union[Tuple[int, int, int, int], int],
+        vision_width: int,
+        vision_patch_size: int,
+        # text
+        vocab_size: int,
+        text_attention_probs_dropout_prob: float,
+        text_hidden_act: str,
+        text_hidden_dropout_prob: float,
+        text_hidden_size: int,
+        text_initializer_range: float,
+        text_intermediate_size: int,
+        text_max_position_embeddings: int,
+        text_num_attention_heads: int,
+        text_num_hidden_layers: int,
+        text_type_vocab_size: int,
+        tokenizer=_tokenizer,
+        # vision head width, added this param for ViT-H
+        vision_head_width: int = 64,
+        use_flash_attention: bool = False,
+    ):
         super().__init__()
 
         # 初始化视觉模型
@@ -355,7 +407,7 @@ class CLIP(nn.Module):
                 output_dim=embed_dim,
                 heads=vision_heads,
                 input_resolution=image_resolution,
-                width=vision_width
+                width=vision_width,
             )
         else:
             vision_heads = vision_width // vision_head_width  # 768 / 64 = 12
@@ -366,7 +418,7 @@ class CLIP(nn.Module):
                 layers=vision_layers,  # 12
                 heads=vision_heads,  # 12
                 output_dim=embed_dim,  # 512
-                use_flash_attention=use_flash_attention
+                use_flash_attention=use_flash_attention,
             )
 
         # 初始化语言模型
@@ -383,7 +435,7 @@ class CLIP(nn.Module):
             type_vocab_size=text_type_vocab_size,  # 2
             initializer_range=text_initializer_range,  #  0.02
             layer_norm_eps=1e-12,
-            use_flash_attention=use_flash_attention
+            use_flash_attention=use_flash_attention,
         )
         self.bert = BertModel(self.bert_config)
 
@@ -406,7 +458,7 @@ class CLIP(nn.Module):
 
         if isinstance(self.visual, ModifiedResNet):
             if self.visual.attnpool is not None:
-                std = self.visual.attnpool.c_proj.in_features ** -0.5
+                std = self.visual.attnpool.c_proj.in_features**-0.5
                 nn.init.normal_(self.visual.attnpool.q_proj.weight, std=std)
                 nn.init.normal_(self.visual.attnpool.k_proj.weight, std=std)
                 nn.init.normal_(self.visual.attnpool.v_proj.weight, std=std)
@@ -419,7 +471,7 @@ class CLIP(nn.Module):
 
         # 初始化文本投射层
         if self.text_projection is not None:
-            nn.init.normal_(self.text_projection, std=self.bert_config.hidden_size ** -0.5)
+            nn.init.normal_(self.text_projection, std=self.bert_config.hidden_size**-0.5)
 
     @torch.jit.ignore
     def set_grad_checkpointing(self, enable=True):
@@ -443,7 +495,7 @@ class CLIP(nn.Module):
         """
         编码文本
         """
-        pad_index = self.tokenizer.vocab['[PAD]']
+        pad_index = self.tokenizer.vocab["[PAD]"]
         # 获取 attention mask. text.ne 应该是指 text != pad_index 的都是 1
         attn_mask = text.ne(pad_index).type(self.dtype)
         x = self.bert(text, attention_mask=attn_mask)[0].type(self.dtype)  # [batch_size, seq_length, hidden_size]
@@ -562,64 +614,74 @@ def convert_state_dict(state_dict):
     if not state_dict:
         return state_dict
 
-    prefix = 'module.' if list(state_dict.keys())[0].startswith('module') else ''
+    prefix = "module." if list(state_dict.keys())[0].startswith("module") else ""
 
-    if f'{prefix}visual.transformer.resblocks.0.attn.in_proj_weight' in state_dict:
+    if f"{prefix}visual.transformer.resblocks.0.attn.in_proj_weight" in state_dict:
         for k in list(state_dict.keys()):
-            if 'attn.in_proj_weight' in k:
-                state_dict[k.replace('attn.in_proj_weight', 'attn.Wqkv.weight')] = state_dict.pop(k)
-            elif 'attn.in_proj_bias' in k:
-                state_dict[k.replace('attn.in_proj_bias', 'attn.Wqkv.bias')] = state_dict.pop(k)
-    elif f'{prefix}visual.transformer.resblocks.0.attn.Wqkv.weight' in state_dict:
+            if "attn.in_proj_weight" in k:
+                state_dict[k.replace("attn.in_proj_weight", "attn.Wqkv.weight")] = state_dict.pop(k)
+            elif "attn.in_proj_bias" in k:
+                state_dict[k.replace("attn.in_proj_bias", "attn.Wqkv.bias")] = state_dict.pop(k)
+    elif f"{prefix}visual.transformer.resblocks.0.attn.Wqkv.weight" in state_dict:
         for k in list(state_dict.keys()):
-            if 'attn.Wqkv.weight' in k:
-                state_dict[k.replace('attn.Wqkv.weight', 'attn.in_proj_weight')] = state_dict.pop(k)
-            elif 'attn.Wqkv.bias' in k:
-                state_dict[k.replace('attn.Wqkv.bias', 'attn.in_proj_bias')] = state_dict.pop(k)
+            if "attn.Wqkv.weight" in k:
+                state_dict[k.replace("attn.Wqkv.weight", "attn.in_proj_weight")] = state_dict.pop(k)
+            elif "attn.Wqkv.bias" in k:
+                state_dict[k.replace("attn.Wqkv.bias", "attn.in_proj_bias")] = state_dict.pop(k)
 
-    if f'{prefix}bert.encoder.layer.0.attention.self.query.weight' in state_dict:
+    if f"{prefix}bert.encoder.layer.0.attention.self.query.weight" in state_dict:
         i = 0
-        while f'{prefix}bert.encoder.layer.{i}.attention.self.query.weight' in state_dict:
-            state_dict[f'{prefix}bert.encoder.layer.{i}.attention.self.Wqkv.weight'] = torch.cat(
-                (state_dict.pop(f'{prefix}bert.encoder.layer.{i}.attention.self.query.weight'),
-                 state_dict.pop(f'{prefix}bert.encoder.layer.{i}.attention.self.key.weight'),
-                 state_dict.pop(f'{prefix}bert.encoder.layer.{i}.attention.self.value.weight'))
+        while f"{prefix}bert.encoder.layer.{i}.attention.self.query.weight" in state_dict:
+            state_dict[f"{prefix}bert.encoder.layer.{i}.attention.self.Wqkv.weight"] = torch.cat(
+                (
+                    state_dict.pop(f"{prefix}bert.encoder.layer.{i}.attention.self.query.weight"),
+                    state_dict.pop(f"{prefix}bert.encoder.layer.{i}.attention.self.key.weight"),
+                    state_dict.pop(f"{prefix}bert.encoder.layer.{i}.attention.self.value.weight"),
+                )
             )
-            state_dict[f'{prefix}bert.encoder.layer.{i}.attention.self.Wqkv.bias'] = torch.cat(
-                (state_dict.pop(f'{prefix}bert.encoder.layer.{i}.attention.self.query.bias'),
-                 state_dict.pop(f'{prefix}bert.encoder.layer.{i}.attention.self.key.bias'),
-                 state_dict.pop(f'{prefix}bert.encoder.layer.{i}.attention.self.value.bias'))
+            state_dict[f"{prefix}bert.encoder.layer.{i}.attention.self.Wqkv.bias"] = torch.cat(
+                (
+                    state_dict.pop(f"{prefix}bert.encoder.layer.{i}.attention.self.query.bias"),
+                    state_dict.pop(f"{prefix}bert.encoder.layer.{i}.attention.self.key.bias"),
+                    state_dict.pop(f"{prefix}bert.encoder.layer.{i}.attention.self.value.bias"),
+                )
             )
-            state_dict[f'{prefix}bert.encoder.layer.{i}.attention.self.out_proj.weight'] = \
-                state_dict.pop(f'{prefix}bert.encoder.layer.{i}.attention.output.dense.weight')
-            state_dict[f'{prefix}bert.encoder.layer.{i}.attention.self.out_proj.bias'] = \
-                state_dict.pop(f'{prefix}bert.encoder.layer.{i}.attention.output.dense.bias')
+            state_dict[f"{prefix}bert.encoder.layer.{i}.attention.self.out_proj.weight"] = state_dict.pop(
+                f"{prefix}bert.encoder.layer.{i}.attention.output.dense.weight"
+            )
+            state_dict[f"{prefix}bert.encoder.layer.{i}.attention.self.out_proj.bias"] = state_dict.pop(
+                f"{prefix}bert.encoder.layer.{i}.attention.output.dense.bias"
+            )
             i += 1
-    elif f'{prefix}bert.encoder.layer.0.attention.self.Wqkv.weight' in state_dict:
+    elif f"{prefix}bert.encoder.layer.0.attention.self.Wqkv.weight" in state_dict:
         i = 0
-        while f'{prefix}bert.encoder.layer.{i}.attention.self.Wqkv.weight' in state_dict:
-            state_dict[f'{prefix}bert.encoder.layer.{i}.attention.self.query.weight'], \
-            state_dict[f'{prefix}bert.encoder.layer.{i}.attention.self.key.weight'], \
-            state_dict[f'{prefix}bert.encoder.layer.{i}.attention.self.value.weight'] = \
-                torch.chunk(state_dict.pop(f'{prefix}bert.encoder.layer.{i}.attention.self.Wqkv.weight'), chunks=3)
-            state_dict[f'{prefix}bert.encoder.layer.{i}.attention.self.query.bias'], \
-            state_dict[f'{prefix}bert.encoder.layer.{i}.attention.self.key.bias'], \
-            state_dict[f'{prefix}bert.encoder.layer.{i}.attention.self.value.bias'] = \
-                torch.chunk(state_dict.pop(f'{prefix}bert.encoder.layer.{i}.attention.self.Wqkv.bias'), chunks=3)
-            state_dict[f'{prefix}bert.encoder.layer.{i}.attention.output.dense.weight'] = \
-                state_dict.pop(f'{prefix}bert.encoder.layer.{i}.attention.self.out_proj.weight')
-            state_dict[f'{prefix}bert.encoder.layer.{i}.attention.output.dense.bias'] = \
-                state_dict.pop(f'module.bert.encoder.layer.{i}.attention.self.out_proj.bias')
+        while f"{prefix}bert.encoder.layer.{i}.attention.self.Wqkv.weight" in state_dict:
+            (
+                state_dict[f"{prefix}bert.encoder.layer.{i}.attention.self.query.weight"],
+                state_dict[f"{prefix}bert.encoder.layer.{i}.attention.self.key.weight"],
+                state_dict[f"{prefix}bert.encoder.layer.{i}.attention.self.value.weight"],
+            ) = torch.chunk(state_dict.pop(f"{prefix}bert.encoder.layer.{i}.attention.self.Wqkv.weight"), chunks=3)
+            (
+                state_dict[f"{prefix}bert.encoder.layer.{i}.attention.self.query.bias"],
+                state_dict[f"{prefix}bert.encoder.layer.{i}.attention.self.key.bias"],
+                state_dict[f"{prefix}bert.encoder.layer.{i}.attention.self.value.bias"],
+            ) = torch.chunk(state_dict.pop(f"{prefix}bert.encoder.layer.{i}.attention.self.Wqkv.bias"), chunks=3)
+            state_dict[f"{prefix}bert.encoder.layer.{i}.attention.output.dense.weight"] = state_dict.pop(
+                f"{prefix}bert.encoder.layer.{i}.attention.self.out_proj.weight"
+            )
+            state_dict[f"{prefix}bert.encoder.layer.{i}.attention.output.dense.bias"] = state_dict.pop(
+                f"module.bert.encoder.layer.{i}.attention.self.out_proj.bias"
+            )
             i += 1
 
     return state_dict
 
 
-def resize_pos_embed(state_dict, model, interpolation: str = 'bicubic', seq_dim=1, prefix=""):
+def resize_pos_embed(state_dict, model, interpolation: str = "bicubic", seq_dim=1, prefix=""):
     # Rescale the grid of position embeddings when loading from state_dict
-    old_pos_embed = state_dict.get(prefix + 'visual.positional_embedding', None)
-    model = model.module if hasattr(model, 'module') else model
-    if old_pos_embed is None or not hasattr(model.visual, 'grid_size'):
+    old_pos_embed = state_dict.get(prefix + "visual.positional_embedding", None)
+    model = model.module if hasattr(model, "module") else model
+    if old_pos_embed is None or not hasattr(model.visual, "grid_size"):
         return
     grid_size = to_2tuple(model.visual.grid_size)
     extra_tokens = 1  # FIXME detect different token configs (ie no class token, or more)
@@ -633,7 +695,7 @@ def resize_pos_embed(state_dict, model, interpolation: str = 'bicubic', seq_dim=
         pos_emb_tok, pos_emb_img = None, old_pos_embed
     old_grid_size = to_2tuple(int(math.sqrt(len(pos_emb_img))))
 
-    logging.info('Resizing position embedding grid-size from %s to %s', old_grid_size, grid_size)
+    logging.info("Resizing position embedding grid-size from %s to %s", old_grid_size, grid_size)
     pos_emb_img = pos_emb_img.reshape(1, old_grid_size[0], old_grid_size[1], -1).permute(0, 3, 1, 2)
     pos_emb_img = F.interpolate(
         pos_emb_img,
@@ -646,7 +708,7 @@ def resize_pos_embed(state_dict, model, interpolation: str = 'bicubic', seq_dim=
         new_pos_embed = torch.cat([pos_emb_tok, pos_emb_img], dim=0)
     else:
         new_pos_embed = pos_emb_img
-    state_dict[prefix + 'visual.positional_embedding'] = new_pos_embed
+    state_dict[prefix + "visual.positional_embedding"] = new_pos_embed
 
 
 # From PyTorch internals
@@ -655,6 +717,7 @@ def _ntuple(n):
         if isinstance(x, collections.abc.Iterable):
             return x
         return tuple(repeat(x, n))
+
     return parse
 
 
