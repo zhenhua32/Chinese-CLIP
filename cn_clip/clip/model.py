@@ -191,7 +191,7 @@ class QuickGELU(nn.Module):
 
 class ResidualAttentionBlock(nn.Module):
     """
-    单层网络, 表示 transformer 中的一个 block
+    残差注意力块, 单层网络, 表示 transformer 中的一个 block
     """
     def __init__(self, d_model: int, n_head: int, attn_mask: torch.Tensor = None, use_flash_attention: bool = False):
         """
@@ -223,13 +223,16 @@ class ResidualAttentionBlock(nn.Module):
             return self.attn(x.transpose(1, 0))[0].transpose(1, 0)
         else:
             # 先看这里. 他的输入是 (query, key, value), 自注意力机制中, query, key, value 都是同一个 x
+            # self.attn 的返回值是 (attn_output, attn_output_weights)
             return self.attn(x, x, x, need_weights=False, attn_mask=self.attn_mask)[0]
 
     def forward(self, x: torch.Tensor):
         """
         前向传播
+        x 的 shape 是  (197, batch_size, 768).
         """
         # x + 是指残差连接. ln_1 会先对输入 x 进行归一化, 然后进入 attention 层.
+        # nn.MultiheadAttention 的输入输出的 shape 是一样的
         x = x + self.attention(self.ln_1(x))
         # mlp 是一个两层的全连接网络, 用于对 attention 层的输出进行处理
         x = x + self.mlp(self.ln_2(x))
@@ -253,6 +256,9 @@ class Transformer(nn.Module):
         )
 
     def forward(self, x: torch.Tensor):
+        """
+        x 的 shape 是  (197, batch_size, 768).
+        """
         # 使用检查点技术, 降低显存占用, 但是会加重计算量
         if self.grad_checkpointing and not torch.jit.is_scripting():
             for r in self.resblocks:
@@ -350,7 +356,7 @@ class VisualTransformer(nn.Module):
         # 经过 LayerNorm
         x = self.ln_pre(x)
 
-        # x 的 shape 是  (197, batch_size, 768). 不理解 NLD 的缩写是啥意思
+        # x 的 shape 是  (197, batch_size, 768). 这是 nn.MultiheadAttention 要求的
         x = x.permute(1, 0, 2)  # NLD -> LND
         x = self.transformer(x)
         # x 的 shape 是 (batch_size, 197, 768)
