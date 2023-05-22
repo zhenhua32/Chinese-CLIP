@@ -15,6 +15,7 @@ from cn_clip.clip.model import convert_weights, CLIP, restore_model
 
 __all__ = ["load", "tokenize", "available_models", "image_transform", "load_from_name"]
 
+# 模型种类和下载地址
 _MODELS = {
     "ViT-B-16": "https://clip-cn-beijing.oss-cn-beijing.aliyuncs.com/checkpoints/clip_cn_vit-b-16.pt",
     "ViT-L-14": "https://clip-cn-beijing.oss-cn-beijing.aliyuncs.com/checkpoints/clip_cn_vit-l-14.pt",
@@ -22,6 +23,7 @@ _MODELS = {
     "ViT-H-14": "https://clip-cn-beijing.oss-cn-beijing.aliyuncs.com/checkpoints/clip_cn_vit-h-14.pt",
     "RN50": "https://clip-cn-beijing.oss-cn-beijing.aliyuncs.com/checkpoints/clip_cn_rn50.pt",
 }
+# 模型信息, struct 是模型结构, 用 @ 分隔, 左边是图片模型, 右边是文本模型, input_resolution 是输入图片的分辨率
 _MODEL_INFO = {
     "ViT-B-16": {"struct": "ViT-B-16@RoBERTa-wwm-ext-base-chinese", "input_resolution": 224},
     "ViT-L-14": {"struct": "ViT-L-14@RoBERTa-wwm-ext-base-chinese", "input_resolution": 224},
@@ -32,6 +34,9 @@ _MODEL_INFO = {
 
 
 def _download(url: str, root: str):
+    """
+    下载到指定目录下
+    """
     os.makedirs(root, exist_ok=True)
     filename = os.path.basename(url)
 
@@ -48,6 +53,7 @@ def _download(url: str, root: str):
             total=int(source.info().get("Content-Length")), ncols=80, unit="iB", unit_scale=True, unit_divisor=1024
         ) as loop:
             while True:
+                # 没想到是这样操作的, 每次读取 8192 字节, 即 8KB, 然后写入
                 buffer = source.read(8192)
                 if not buffer:
                     break
@@ -75,6 +81,11 @@ def load_from_name(
     text_model_name: str = None,
     input_resolution: int = None,
 ):
+    """
+    基于名字加载模型
+    name: 模型名字 或者 模型的路径
+    
+    """
     if name in _MODELS:
         model_path = _download(_MODELS[name], download_root or os.path.expanduser("~/.cache/clip"))
         model_name, model_input_resolution = _MODEL_INFO[name]["struct"], _MODEL_INFO[name]["input_resolution"]
