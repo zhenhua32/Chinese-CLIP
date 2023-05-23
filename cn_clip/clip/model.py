@@ -10,6 +10,7 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 from torch.utils.checkpoint import checkpoint
+from torch.cuda.amp import autocast
 
 import importlib.util
 
@@ -325,6 +326,7 @@ class VisualTransformer(nn.Module):
         x_masked_add = torch.cat([x0, x_masked], axis=1)
         return x_masked_add
 
+    # @autocast()  # 会使得图片的输出精度变成 float16
     def forward(self, x: torch.Tensor, mask_ratio: float = 0.0):
         """
         看看前向传播的过程
@@ -486,6 +488,9 @@ class CLIP(nn.Module):
 
     @property
     def dtype(self):
+        """
+        注意这里使用的是 dtype
+        """
         return self.visual.conv1.weight.dtype
 
     def encode_image(self, image, mask_ratio=0):
@@ -557,6 +562,9 @@ class CLIP(nn.Module):
 
 
 def convert_models_to_fp32(model):
+    """
+    这里还有个将模型精度转换成 float32 的函数
+    """
     for p in model.parameters():
         p.data = p.data.float()
         if p.grad:
@@ -565,6 +573,8 @@ def convert_models_to_fp32(model):
 
 def convert_weights(model: nn.Module):
     """Convert applicable model parameters to fp16"""
+
+    print("将模型转换成 float16 精度")
 
     def _convert_weights_to_fp16(l):
         if isinstance(l, (nn.Conv1d, nn.Conv2d, nn.Linear)):

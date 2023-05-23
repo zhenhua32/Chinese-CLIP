@@ -80,16 +80,24 @@ def load_from_name(
     vision_model_name: str = None,
     text_model_name: str = None,
     input_resolution: int = None,
+    convert_to_float16: bool = True,
 ):
     """
     基于名字加载模型
     name: 模型名字 或者 模型的路径
-    
+    device: cpu 或者 cuda
+    download_root: 模型下载的根目录
+    vision_model_name: 图片模型名字
+    text_model_name: 文本模型名字
+    input_resolution: 输入图片的分辨率
+    convert_to_float16: 将模型精度转换为 float16
     """
     if name in _MODELS:
+        # 只给名字, 就尝试下载模型
         model_path = _download(_MODELS[name], download_root or os.path.expanduser("~/.cache/clip"))
         model_name, model_input_resolution = _MODEL_INFO[name]["struct"], _MODEL_INFO[name]["input_resolution"]
     elif os.path.isfile(name):
+        # 如果是文件, 就要求这三个参数都在 vision_model_name and text_model_name and input_resolution
         assert (
             vision_model_name and text_model_name and input_resolution
         ), "Please specify specific 'vision_model_name', 'text_model_name', and 'input_resolution'"
@@ -98,15 +106,20 @@ def load_from_name(
     else:
         raise RuntimeError(f"Model {name} not found; available models = {available_models()}")
 
+    # 读取检查点
     with open(model_path, "rb") as opened_file:
         # loading saved checkpoint
         checkpoint = torch.load(opened_file, map_location="cpu")
 
-    model = create_model(model_name, checkpoint)
+    # 创建模型
+    model = create_model(model_name, checkpoint, convert_to_float16=convert_to_float16)
+    # 将模型转换到指定设备
     if str(device) == "cpu":
+        # 直接用 .float() 将模型精度转换为 float32
         model.float()
     else:
         model.to(device)
+    # 返回模型和图片处理函数
     return model, image_transform(model_input_resolution)
 
 
@@ -181,9 +194,15 @@ def image_transform(image_size=224):
     return transform
 
 
-def create_model(model_name, checkpoint=None):
+def create_model(model_name, checkpoint=None, convert_to_float16=True):
+    """
+    创建模型, 并从 checkpoint 中加载权重
+    model_name: 模型名字
+    checkpoint: 检查点
+    convert_to_float16: 是否将模型精度转换为 float16
+    """
     vision_model, text_model = model_name.split("@")
-    # Initialize the model.
+    # Initialize the model. 读取配置文件
     vision_model_config_file = Path(__file__).parent / f"model_configs/{vision_model.replace('/', '-')}.json"
     print("Loading vision model config from", vision_model_config_file)
     assert os.path.exists(vision_model_config_file)
@@ -192,6 +211,7 @@ def create_model(model_name, checkpoint=None):
     print("Loading text model config from", text_model_config_file)
     assert os.path.exists(text_model_config_file)
 
+    # 从配置文件中读取模型信息, 组建成 model_info
     with open(vision_model_config_file, "r") as fv, open(text_model_config_file, "r") as ft:
         model_info = json.load(fv)
         for k, v in json.load(ft).items():
@@ -199,10 +219,16 @@ def create_model(model_name, checkpoint=None):
     if isinstance(model_info["vision_layers"], str):
         model_info["vision_layers"] = eval(model_info["vision_layers"])
     print("Model info", model_info)
+
+    # 初始化模型
     model = CLIP(**model_info)
-    convert_weights(model)
+    # 将模型精度转换为 float16
+    if convert_to_float16:
+        convert_weights(model)
+    # 从检查点中加载权重
     if checkpoint:
         sd = checkpoint["state_dict"]
+        # 如果 sd 的 key 是以 module. 开头的, 就去掉 module.
         if next(iter(sd.items()))[0].startswith("module"):
             sd = {k[len("module.") :]: v for k, v in sd.items() if "bert.pooler" not in k}
         model.load_state_dict(sd)
