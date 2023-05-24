@@ -194,6 +194,7 @@ class ResidualAttentionBlock(nn.Module):
     """
     残差注意力块, 单层网络, 表示 transformer 中的一个 block
     """
+
     def __init__(self, d_model: int, n_head: int, attn_mask: torch.Tensor = None, use_flash_attention: bool = False):
         """
         假设 d_model = 768, n_head = 12
@@ -288,7 +289,7 @@ class VisualTransformer(nn.Module):
         """
         super().__init__()
         self.input_resolution = input_resolution
-        # grid_size = (14, 14)
+        # grid_size = (14, 14) 网格数
         self.grid_size = (self.input_resolution // patch_size, self.input_resolution // patch_size)
         self.output_dim = output_dim
         self.conv1 = nn.Conv2d(in_channels=3, out_channels=width, kernel_size=patch_size, stride=patch_size, bias=False)
@@ -561,7 +562,7 @@ class CLIP(nn.Module):
         return logits_per_image, logits_per_text
 
 
-def convert_models_to_fp32(model):
+def convert_models_to_fp32(model: nn.Module):
     """
     这里还有个将模型精度转换成 float32 的函数
     """
@@ -571,8 +572,10 @@ def convert_models_to_fp32(model):
             p.grad.data = p.grad.data.float()
 
 
-def convert_weights(model: nn.Module):
-    """Convert applicable model parameters to fp16"""
+def convert_weights(model: CLIP):
+    """
+    将模型权重的精度转换成 float16
+    Convert applicable model parameters to fp16"""
 
     print("将模型转换成 float16 精度")
 
@@ -600,15 +603,20 @@ def convert_weights(model: nn.Module):
     model.apply(_convert_weights_to_fp16)
 
 
-def restore_model(model, clip_state_dict: dict, bert_state_dict: dict, use_flash_attention: bool):
+def restore_model(model: CLIP, clip_state_dict: dict, bert_state_dict: dict, use_flash_attention: bool):
+    """
+    恢复模型
+    """
     merged_state_dict = {}
 
+    # 读取 clip 的 vit 部分的权重
     # use clip_state_dict to initialize the image encoder & logit scale
     if clip_state_dict is not None:
         for k, v in clip_state_dict.items():
             if k.startswith("visual") or k == "logit_scale":
                 merged_state_dict[k] = v
 
+    # 读取 bert 的权重
     # use bert_state_dict to initialize the text encoder
     if bert_state_dict is not None:
         for k, v in bert_state_dict.items():
@@ -619,27 +627,35 @@ def restore_model(model, clip_state_dict: dict, bert_state_dict: dict, use_flash
     if use_flash_attention:
         merged_state_dict = convert_state_dict(merged_state_dict)
 
+    # 将模型的权重转换成 float16
     convert_weights(model)
+    # 重置位置嵌入
     resize_pos_embed(merged_state_dict, model)
+    # 将模型的权重加载到模型中
     model.load_state_dict(merged_state_dict, strict=False)
     return model.eval()
 
 
 def convert_state_dict(state_dict):
-    """Adapt to Flash Attention"""
+    """Adapt to Flash Attention
+    适应 Flash Attention
+    """
     if not state_dict:
         return state_dict
 
+    # 定义前缀, 兼容多卡训练的保存结果
     prefix = "module." if list(state_dict.keys())[0].startswith("module") else ""
 
     if f"{prefix}visual.transformer.resblocks.0.attn.in_proj_weight" in state_dict:
         for k in list(state_dict.keys()):
+            # 更换名字
             if "attn.in_proj_weight" in k:
                 state_dict[k.replace("attn.in_proj_weight", "attn.Wqkv.weight")] = state_dict.pop(k)
             elif "attn.in_proj_bias" in k:
                 state_dict[k.replace("attn.in_proj_bias", "attn.Wqkv.bias")] = state_dict.pop(k)
     elif f"{prefix}visual.transformer.resblocks.0.attn.Wqkv.weight" in state_dict:
         for k in list(state_dict.keys()):
+            # 同样时更换名字, 和上面的是相反的
             if "attn.Wqkv.weight" in k:
                 state_dict[k.replace("attn.Wqkv.weight", "attn.in_proj_weight")] = state_dict.pop(k)
             elif "attn.Wqkv.bias" in k:
@@ -671,6 +687,7 @@ def convert_state_dict(state_dict):
             i += 1
     elif f"{prefix}bert.encoder.layer.0.attention.self.Wqkv.weight" in state_dict:
         i = 0
+        # 果然这里也是相反的操作
         while f"{prefix}bert.encoder.layer.{i}.attention.self.Wqkv.weight" in state_dict:
             (
                 state_dict[f"{prefix}bert.encoder.layer.{i}.attention.self.query.weight"],
@@ -693,15 +710,22 @@ def convert_state_dict(state_dict):
     return state_dict
 
 
-def resize_pos_embed(state_dict, model, interpolation: str = "bicubic", seq_dim=1, prefix=""):
+def resize_pos_embed(state_dict, model: CLIP, interpolation: str = "bicubic", seq_dim=1, prefix=""):
+    """
+    重置位置嵌入
+    """
     # Rescale the grid of position embeddings when loading from state_dict
     old_pos_embed = state_dict.get(prefix + "visual.positional_embedding", None)
+    # 找到原始模型
     model = model.module if hasattr(model, "module") else model
     if old_pos_embed is None or not hasattr(model.visual, "grid_size"):
         return
+    # to_2tuple 将输入转换为长度为2的元组. grid_size 是网格数, 就是图片被切成了多少块
     grid_size = to_2tuple(model.visual.grid_size)
     extra_tokens = 1  # FIXME detect different token configs (ie no class token, or more)
+    # 总的序列长度
     new_seq_len = grid_size[0] * grid_size[1] + extra_tokens
+    # 如果长度一致, 就不用更改了, 直接返回
     if new_seq_len == old_pos_embed.shape[0]:
         return
 
@@ -709,16 +733,21 @@ def resize_pos_embed(state_dict, model, interpolation: str = "bicubic", seq_dim=
         pos_emb_tok, pos_emb_img = old_pos_embed[:extra_tokens], old_pos_embed[extra_tokens:]
     else:
         pos_emb_tok, pos_emb_img = None, old_pos_embed
+    # 旧的网格大小
     old_grid_size = to_2tuple(int(math.sqrt(len(pos_emb_img))))
 
+    # 缩放位置嵌入
     logging.info("Resizing position embedding grid-size from %s to %s", old_grid_size, grid_size)
+    # pos_emb_img 的 shape 是 (1, height, width, channel) => (1, channel, height, width)
     pos_emb_img = pos_emb_img.reshape(1, old_grid_size[0], old_grid_size[1], -1).permute(0, 3, 1, 2)
+    # 这就是缩放函数
     pos_emb_img = F.interpolate(
-        pos_emb_img,
-        size=grid_size,
-        mode=interpolation,
-        align_corners=True,
+        pos_emb_img,  # 输入
+        size=grid_size,  # 缩放到的大小
+        mode=interpolation,  # 插值方式
+        align_corners=True,  # 缩放时保证角点像素不变
     )
+    # (1, channel, height, width) => (1, height, width, channel) => (1, height * width, channel) => (height * width, channel)
     pos_emb_img = pos_emb_img.permute(0, 2, 3, 1).reshape(1, grid_size[0] * grid_size[1], -1)[0]
     if pos_emb_tok is not None:
         new_pos_embed = torch.cat([pos_emb_tok, pos_emb_img], dim=0)
@@ -732,6 +761,7 @@ def _ntuple(n):
     def parse(x):
         if isinstance(x, collections.abc.Iterable):
             return x
+        # 将 x 重复 n 次
         return tuple(repeat(x, n))
 
     return parse
