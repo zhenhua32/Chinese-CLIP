@@ -130,13 +130,17 @@ def load(
     bert_path=None,
     use_flash_attention=False,
 ):
-    """Load CLIP and BERT model weights"""
+    """
+    加载 CLIP 模型 和 BERT 模型 的权重
+    Load CLIP and BERT model weights"""
 
     bert_state_dict = torch.load(bert_path, map_location="cpu") if bert_path else None
     clip_state_dict = torch.load(clip_path, map_location="cpu") if clip_path else None
 
+    # 感觉像是组合模型的权重
     restore_model(model, clip_state_dict, bert_state_dict, use_flash_attention).to(device)
 
+    # CPU 版本的模型精度转换为 float32
     if str(device) == "cpu":
         model.float()
     return model
@@ -183,6 +187,9 @@ def _convert_to_rgb(image):
 
 
 def image_transform(image_size=224):
+    """
+    图片的预处理函数
+    """
     transform = Compose(
         [
             Resize((image_size, image_size), interpolation=InterpolationMode.BICUBIC),
