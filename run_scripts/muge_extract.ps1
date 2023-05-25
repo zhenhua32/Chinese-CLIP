@@ -5,7 +5,7 @@ $env:PYTHONPATH = $env:PYTHONPATH + ";$pwd/cn_clip/"
 $DATAPATH=$args[0]
 Write-Host $DATAPATH
 
-$split="valid" # 指定计算valid或test集特征
+$split="test" # 指定计算valid或test集特征
 $resume="${DATAPATH}/experiments/muge_finetune_vit-b-16_roberta-base_bs160/checkpoints/epoch_latest.pt"
 
 # 中文无法输出

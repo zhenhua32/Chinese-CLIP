@@ -150,7 +150,7 @@ if __name__ == "__main__":
         print("Preparing text inference dataset.")
         text_data = get_eval_txt_dataset(args, max_txt_length=args.context_length)
 
-    # Resume from a checkpoint.
+    # Resume from a checkpoint. 恢复检查点
     print("Begin to load model checkpoint from {}.".format(args.resume))
     assert os.path.exists(args.resume), "The checkpoint file {} not exists!".format(args.resume)
     # Map model to be loaded to specified single gpu.
@@ -176,9 +176,12 @@ if __name__ == "__main__":
                 for batch in tqdm(dataloader):
                     text_ids, texts = batch
                     texts = texts.cuda(args.gpu, non_blocking=True)
-                    text_features = model(None, texts)
+                    # 提取文本特征
+                    text_features: torch.Tensor = model(None, texts)
+                    # 归一化, 就是将向量除以自己的模, 使得向量的模为 1
                     text_features /= text_features.norm(dim=-1, keepdim=True)
                     for text_id, text_feature in zip(text_ids.tolist(), text_features.tolist()):
+                        # 写入文件中, 一行一个 json
                         fout.write("{}\n".format(json.dumps({"text_id": text_id, "feature": text_feature})))
                         write_cnt += 1
         print("{} text features are stored in {}".format(write_cnt, args.text_feat_output_path))
@@ -195,6 +198,7 @@ if __name__ == "__main__":
             dataloader = img_data.dataloader
             with torch.no_grad():
                 for batch in tqdm(dataloader):
+                    # 同样的流程
                     image_ids, images = batch
                     images = images.cuda(args.gpu, non_blocking=True)
                     image_features = model(images, None)
