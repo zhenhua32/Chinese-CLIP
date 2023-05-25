@@ -13,7 +13,10 @@ import time
 NUM_K = 10
 
 
-def read_submission(submit_path, reference, k=5):
+def read_submission(submit_path: str, reference: dict, k: int = 5):
+    """
+    读取模型预测文件, 返回 submission_dict
+    """
     # check whether the path of submitted file exists
     if not os.path.exists(submit_path):
         raise Exception("The submission file is not found!")
@@ -42,6 +45,7 @@ def read_submission(submit_path, reference, k=5):
             image_ids = pred_obj["image_ids"]
             if not isinstance(image_ids, list):
                 raise Exception("The image_ids field of text_id {} is not a list, please check your schema".format(qid))
+            # 终于完了, 前面一堆检查, 就是为了获取 qid 和 image_ids
             # check whether there are K products for each text
             if len(image_ids) != k:
                 raise Exception(
@@ -62,6 +66,7 @@ def read_submission(submit_path, reference, k=5):
                 raise Exception(
                     "Text_id {} has duplicate topk images in your prediction. Pleace check again!".format(qid)
                 )
+            # 终于构成了一个字典
             submission_dict[qid] = image_ids  # here we save the list of product ids
 
     # check if any text is missing in the submission
@@ -95,6 +100,7 @@ def report_error_msg(detail, showMsg, out_p):
 def report_score(r1, r5, r10, out_p):
     result = dict()
     result["success"] = True
+    # 求均值
     mean_recall = (r1 + r5 + r10) / 3.0
     result["score"] = mean_recall * 100
     result["scoreJson"] = {
@@ -108,6 +114,9 @@ def report_score(r1, r5, r10, out_p):
 
 
 def read_reference(path):
+    """
+    构建标准答案的字典, key 是 text_id, value 是 image_ids, 即一个 list, 里面是该 text 对应的所有 image_id
+    """
     fin = open(path, encoding="utf-8")
     reference = dict()
     for line in fin:
@@ -118,6 +127,9 @@ def read_reference(path):
 
 
 def compute_score(golden_file, predict_file):
+    """
+    没用上
+    """
     # read ground-truth
     reference = read_reference(golden_file)
 
@@ -145,10 +157,13 @@ def compute_score(golden_file, predict_file):
 
 
 if __name__ == "__main__":
+    # 标准答案文件
     # the path of answer json file (eg. test_queries_answers.jsonl)
     standard_path = sys.argv[1]
+    # 模型预测文件
     # the path of prediction file (eg. example_pred.jsonl)
     submit_path = sys.argv[2]
+    # 指标输出文件
     # the score will be dumped into this output json file
     out_path = sys.argv[3]
 
@@ -165,6 +180,7 @@ if __name__ == "__main__":
 
         # compute score for each text
         r1_stat, r5_stat, r10_stat = 0, 0, 0
+        # 计算每个 query, 看看预测的值和标准答案的值是否有交集
         for qid in reference.keys():
             ground_truth_ids = set(reference[qid])
             top10_pred_ids = predictions[qid]
