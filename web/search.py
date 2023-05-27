@@ -101,14 +101,14 @@ class Searcher:
         distance_matrix, index_matrix = self.index_engine.search(query_vector, top_k)
         return distance_matrix[0], index_matrix[0]
 
-    def display_10_images(self, title, index_list, gold_ids=None, top_k: int = 10):
+    def display_images(self, title, index_list, gold_ids=None, top_k: int = 10):
         """
         index_list 是通过向量查找的图片index, list[int]
         gold_ids 是实际标签的图片id, list[int]
         """
-        # 创建一个 1 行 4 列的画布
+        # 创建一个 2 行 k 列的画布
         fig, ax = plt.subplots(2, top_k, figsize=(20, 5))
-        # 展示实际标签图片
+        # 第一行展示实际标签图片
         if gold_ids:
             for i, image_id in enumerate(gold_ids):
                 index = self.image_id2index[str(image_id)]
@@ -116,7 +116,7 @@ class Searcher:
                 image = base64_to_image(image_base64)
                 ax[0, i].imshow(image)
                 ax[0, i].set_title(image_id)
-        # 在每个子图上显示一张图片
+        # 第二行展示检索结果
         for i, index in enumerate(index_list):
             image_id = self.index2image[str(index)]["image_id"]
             image_base64 = self.index2image[str(index)]["image_base64"]

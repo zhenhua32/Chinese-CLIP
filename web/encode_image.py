@@ -49,15 +49,15 @@ def batch_encode_image():
                     "image_id": image_id,
                     "image_base64": image_base64,
                 }
-                # image = base64_to_image(image_base64)
-                # image_vector = clip_model.encode_image(image)
-                # vector_list.append(image_vector)
+                image = base64_to_image(image_base64)
+                image_vector = clip_model.encode_image(image)
+                vector_list.append(image_vector)
                 index += 1
 
     # 保存向量
-    # vector_list = np.array(vector_list).astype(np.float32)
-    # print(vector_list.shape, vector_list.dtype)
-    # np.save(image_vectors_file, vector_list)
+    vector_list = np.array(vector_list).astype(np.float32)
+    print(vector_list.shape, vector_list.dtype)
+    np.save(image_vectors_file, vector_list)
 
     # 保存id映射
     with open(index2info_file, "w", encoding="utf-8") as f:
