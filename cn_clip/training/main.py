@@ -126,10 +126,12 @@ def main():
     if args.precision == "fp16":
         convert_weights(model)
 
+    # 看看梯度检查点是怎么触发的
     if args.grad_checkpointing:
         assert not torch_version_str_compare_lessequal(
             torch.__version__, "1.8.0"
         ), "Currently our grad_checkpointing is not compatible with torch version <= 1.8.0."
+        # 就一步就搞定了
         model.set_grad_checkpointing()
         logging.info("Grad-checkpointing activated.")
 

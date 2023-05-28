@@ -264,6 +264,7 @@ class BertEncoder(nn.Module):
                 all_hidden_states = all_hidden_states + (hidden_states,)
 
             if self.grad_checkpointing and not torch.jit.is_scripting():
+                # 在每一层中使用梯度检查点
                 layer_outputs = checkpoint(layer_module, hidden_states, attention_mask, head_mask[i])
             else:
                 layer_outputs = layer_module(hidden_states, attention_mask, head_mask[i])
@@ -430,6 +431,9 @@ class BertModel(BertPreTrainedModel):
 
     @torch.jit.ignore
     def set_grad_checkpointing(self, enable=True):
+        """
+        启用梯度检查点
+        """
         if enable:
             assert not self.config.output_attentions, \
                 "Grad checkpointing is currently conflict with output_attentions for BertEncoder, \

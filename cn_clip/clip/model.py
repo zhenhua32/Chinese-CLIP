@@ -263,6 +263,7 @@ class Transformer(nn.Module):
         """
         # 使用检查点技术, 降低显存占用, 但是会加重计算量
         if self.grad_checkpointing and not torch.jit.is_scripting():
+            # 只要遍历模型中的每一层, 然后对每一层进行检查点
             for r in self.resblocks:
                 x = checkpoint(r, x)
             return x
@@ -310,6 +311,10 @@ class VisualTransformer(nn.Module):
 
     @torch.jit.ignore
     def set_grad_checkpointing(self, enable=True):
+        """
+        启用梯度检查点技术
+        """
+        # 只要设置个属性就行了
         self.transformer.grad_checkpointing = enable
 
     def random_masking(self, x, mask_ratio):
@@ -484,6 +489,9 @@ class CLIP(nn.Module):
 
     @torch.jit.ignore
     def set_grad_checkpointing(self, enable=True):
+        """
+        启用梯度检查点
+        """
         self.visual.set_grad_checkpointing(enable)
         self.bert.set_grad_checkpointing(enable)
 
