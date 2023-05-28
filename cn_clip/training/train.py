@@ -105,7 +105,6 @@ def freeze_vision_bn(args, model):
 def train(model, data, epoch, optimizer, scaler, scheduler, args, global_trained_steps):
     """
     训练流程
-    TODO: 还没看过训练流程
     """
     # os.environ["WDS_EPOCH"] = str(epoch)
 
@@ -246,6 +245,7 @@ def train(model, data, epoch, optimizer, scaler, scheduler, args, global_trained
 
         epoch_trained_steps += 1
 
+        # 打印日志
         if is_master(args) and ((step + 1) % args.log_interval) == 0:
             batch_size = len(images) * args.accum_freq
             num_samples = (i_accum + 1) * batch_size * args.world_size
@@ -265,6 +265,8 @@ def train(model, data, epoch, optimizer, scaler, scheduler, args, global_trained
                 + f"Global Batch Size: {batch_size * args.world_size}"
             )
 
+        # 奇怪, train 里面也有评估和保存检查点, 外面也有. 哦, 条件不一样, 这里是 valid_step_interval
+        # 训练中的评估
         if (
             args.val_data is not None
             and args.valid_step_interval is not None
@@ -282,6 +284,7 @@ def train(model, data, epoch, optimizer, scaler, scheduler, args, global_trained
             if args.freeze_vision:
                 freeze_vision_bn(args, model)
 
+        # 保存模型. 这里的条件是 save_step_frequency, 那个脚本里写了很大的数值, 一般就不会触发了
         if args.should_save and args.save_step_frequency > 0 and ((step + 1) % args.save_step_frequency) == 0:
             save_path = os.path.join(args.checkpoint_path, f"epoch_{epoch + 1}_{step + 1}.pt")
             t1 = time.time()
@@ -303,6 +306,7 @@ def train(model, data, epoch, optimizer, scaler, scheduler, args, global_trained
                 )
             )
 
+            # 再保存一遍, 但是检查点名字是固定的
             # Save the latest params
             t1 = time.time()
             save_path = os.path.join(args.checkpoint_path, f"epoch_latest.pt")
@@ -328,6 +332,9 @@ def train(model, data, epoch, optimizer, scaler, scheduler, args, global_trained
 
 
 def evaluate(model, data, epoch, args, steps):
+    """
+    TODO: 看下评估流程
+    """
     logging.info("Begin to eval on validation set (epoch {} @ {} steps)...".format(epoch + 1, steps))
 
     model.eval()

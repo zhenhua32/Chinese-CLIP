@@ -271,6 +271,7 @@ def main():
         num_steps_this_epoch = train(model, data, epoch, optimizer, scaler, scheduler, args, steps)
         steps += num_steps_this_epoch
 
+        # 在这里评估模型
         if (
             args.val_data is not None
             and args.valid_epoch_interval is not None
