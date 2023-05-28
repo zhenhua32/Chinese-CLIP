@@ -21,11 +21,16 @@ def is_master(args):
 def get_loss(
     model, images, texts, loss_img, loss_txt, args, accum_image_features=None, accum_text_features=None, accum_idx=-1
 ):
+    """
+    计算损失
+    """
+    # 根据梯度累计频率，计算图像和文本特征
     if args.accum_freq == 1:
         image_features, text_features, logit_scale = model(images, texts, args.mask_ratio)
     else:
         assert accum_image_features and accum_text_features and accum_idx != -1
         chunk_image_features, chunk_text_features, logit_scale = model(images, texts, args.mask_ratio)
+        # 叠加以前的特征
         image_features = torch.cat(
             accum_image_features[:accum_idx] + [chunk_image_features] + accum_image_features[accum_idx + 1 :]
         )
@@ -34,6 +39,7 @@ def get_loss(
         )
     logit_scale = logit_scale.mean()
     if args.aggregate:
+        # 在不同的GPU上聚合特征
         world_size = dist.get_world_size()
         rank = dist.get_rank()
 
@@ -59,16 +65,20 @@ def get_loss(
         logits_per_text = logits_per_image.t()
 
     else:
+        # 每一行是一个图片, 每一列是一个文本和图片的相似度. shape: (image_batch_size, text_batch_size)
         logits_per_image = logit_scale * image_features @ text_features.t()
         logits_per_text = logit_scale * text_features @ image_features.t()
 
+    # 真实标签, shape: (image_batch_size)
     ground_truth = torch.arange(len(logits_per_image)).long()
     ground_truth = ground_truth.cuda(args.local_device_rank, non_blocking=True)
 
+    # 计算图片的损失和文本的损失, 然后取平均
     total_loss = (loss_img(logits_per_image, ground_truth) + loss_txt(logits_per_text, ground_truth)) / 2
 
     acc = None
     if args.report_training_batch_acc:
+        # 计算准确率, 就是在每一行中选择最大的值, 然后看看这个值的索引是不是和真实标签一样
         i2t_acc = (logits_per_image.argmax(-1) == ground_truth).sum() / len(logits_per_image)
         t2i_acc = (logits_per_text.argmax(-1) == ground_truth).sum() / len(logits_per_text)
         acc = {"i2t": i2t_acc, "t2i": t2i_acc}
@@ -77,6 +87,9 @@ def get_loss(
 
 
 def freeze_vision_bn(args, model):
+    """
+    冻结视觉部分的参数
+    """
     # freeze bn running mean and variance
     if "RN" in args.vision_model:
         RN_visual_modules = (
@@ -91,6 +104,7 @@ def freeze_vision_bn(args, model):
 
 def train(model, data, epoch, optimizer, scaler, scheduler, args, global_trained_steps):
     """
+    训练流程
     TODO: 还没看过训练流程
     """
     # os.environ["WDS_EPOCH"] = str(epoch)
@@ -101,27 +115,33 @@ def train(model, data, epoch, optimizer, scaler, scheduler, args, global_trained
 
     dataloader, sampler = data["train"].dataloader, data["train"].sampler
 
+    # 图片和文本的损失函数
     loss_img = nn.CrossEntropyLoss()
     loss_txt = nn.CrossEntropyLoss()
 
+    # 损失函数也要放到 GPU 上
     loss_img = loss_img.cuda(args.local_device_rank)
     loss_txt = loss_txt.cuda(args.local_device_rank)
 
     if sampler is not None:
         sampler.set_epoch(epoch)
 
+    # 每个 epoch 的训练步数
     num_steps_per_epoch = dataloader.num_batches // args.accum_freq
     data_iter = iter(dataloader)
 
+    # 如果使用了梯度累积, 那么需要保存一些中间结果
     if args.accum_freq > 1:
         accum_images, accum_texts, accum_image_features, accum_text_features = [], [], [], []
 
     end = time.time()
     epoch_trained_steps = 0
+    # 开始训练每一个 batch
     for i in range(0, dataloader.num_batches):
         batch = next(data_iter)
 
         i_accum = i // args.accum_freq
+        # 当前的步数
         step = num_steps_per_epoch * epoch + i_accum
         # reach the args.max_steps, exit training:
         if step >= args.max_steps:
@@ -135,18 +155,24 @@ def train(model, data, epoch, optimizer, scaler, scheduler, args, global_trained
 
         optimizer.zero_grad()
 
+        # 获取训练数据
+        # images 的 shape 是 (batch_size, 3, 224, 224)
+        # texts 的 shape 是 (batch_size, seq_len)
+        # eos_indices 的 shape 是 (batch_size, )
         images, texts, eos_indices = batch
 
         images = images.cuda(args.local_device_rank, non_blocking=True)
         texts = texts.cuda(args.local_device_rank, non_blocking=True)
         eos_indices = eos_indices.cuda(args.local_device_rank, non_blocking=True)
 
+        # 计算数据加载时间
         data_time = time.time() - end
 
+        # 实际的模型
         m = model.module
 
         if args.accum_freq == 1:
-            # with automatic mixed precision.
+            # with automatic mixed precision. 使用混合精度训练
             if args.precision == "amp":
                 with autocast():
                     total_loss, acc = get_loss(model, images, texts, loss_img, loss_txt, args)
@@ -155,10 +181,12 @@ def train(model, data, epoch, optimizer, scaler, scheduler, args, global_trained
                 scaler.update()
 
             else:
+                # 不使用混合精度训练
                 total_loss, acc = get_loss(model, images, texts, loss_img, loss_txt, args)
                 total_loss.backward()
                 optimizer.step()
         else:
+            # 使用梯度累加, 先缓存特征, 然后在第 N 次中计算梯度
             # First, cache the features without any gradient tracking.
             with torch.no_grad():
                 with autocast(enabled=(args.precision == "amp")):
@@ -166,6 +194,7 @@ def train(model, data, epoch, optimizer, scaler, scheduler, args, global_trained
                 accum_image_features.append(chunk_image_features)
                 accum_text_features.append(chunk_text_features)
 
+                # 把原始数据也保存起来
                 accum_images.append(images)
                 accum_texts.append(texts)
 
@@ -174,13 +203,16 @@ def train(model, data, epoch, optimizer, scaler, scheduler, args, global_trained
                 # FIXME this makes data time logging unreliable when accumulating
                 continue
 
+            # 特征累积完了, 可以计算一次了
             # Now, ready to take gradients for the last accum_freq batches.
             # Re-do the forward pass for those batches, and use the cached features from the other batches as negatives.
             # Call backwards each time, but only step optimizer at the end.
             optimizer.zero_grad()
             for j in range(args.accum_freq):
+                # 当前的图片和文本输入
                 images = accum_images[j]
                 texts = accum_texts[j]
+                # 计算损失并反向传播
                 with autocast(enabled=(args.precision == "amp")):
                     # `total_loss` and `acc` are coarsely sampled, taking only the last result in the loop.
                     # Although each result should be the same in theory, it will be slightly different in practice
@@ -192,19 +224,23 @@ def train(model, data, epoch, optimizer, scaler, scheduler, args, global_trained
                 else:
                     total_loss.backward()
 
+            # 等所有的梯度都反向传播, 再更新优化器
             if args.precision == "amp":
                 scaler.step(optimizer)
                 scaler.update()
             else:
                 optimizer.step()
 
+        # 重置数据
         # reset gradient accum, if enabled
         if args.accum_freq > 1:
             accum_images, accum_texts, accum_image_features, accum_text_features = [], [], [], []
 
+        # 限制 logit_scale 的范围
         # Note: we clamp to 4.6052 = ln(100), as in the original paper.
         m.logit_scale.data = torch.clamp(m.logit_scale.data, 0, 4.6052)
 
+        # 批次时间是总的, 包含前面的数据加载时间
         batch_time = time.time() - end
         end = time.time()
 

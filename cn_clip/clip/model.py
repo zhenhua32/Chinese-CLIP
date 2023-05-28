@@ -534,6 +534,7 @@ class CLIP(nn.Module):
         image_features = image_features / image_features.norm(dim=-1, keepdim=True)
         text_features = text_features / text_features.norm(dim=-1, keepdim=True)
 
+        # 返回的是 logit_scale 的指数, 也就是 e^logit_scale
         return image_features, text_features, self.logit_scale.exp()
 
     def get_similarity(self, image, text):

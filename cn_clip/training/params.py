@@ -28,10 +28,16 @@ def parse_args():
         help="Path to the LMDB directory with validation data split, default to None which disables validation",
     )
     parser.add_argument(
-        "--num-workers", type=int, default=4, help="The number of workers for training dataloader."
+        "--num-workers",
+        type=int,
+        default=4,
+        help="The number of workers for training dataloader.",
     )
     parser.add_argument(
-        "--valid-num-workers", type=int, default=1, help="The number of workers for validation dataloader (if making validation)."
+        "--valid-num-workers",
+        type=int,
+        default=1,
+        help="The number of workers for validation dataloader (if making validation).",
     )
     parser.add_argument(
         "--logs",
@@ -46,31 +52,58 @@ def parse_args():
         help="Optional identifier for the experiment when storing logs. Otherwise use current time.",
     )
     parser.add_argument(
-        "--log-interval", type=int, default=10, help="How often to log loss info."
+        "--log-interval",
+        type=int,
+        default=10,
+        help="How often to log loss info.",
     )
     parser.add_argument(
-        "--report-training-batch-acc", default=False, action="store_true", help="Whether to report training batch accuracy."
+        "--report-training-batch-acc",
+        default=False,
+        action="store_true",
+        help="Whether to report training batch accuracy.",
     )
     parser.add_argument(
-        "--batch-size", type=int, default=64, help="Batch size for training per GPU."
+        "--batch-size",
+        type=int,
+        default=64,
+        help="Batch size for training per GPU.",
     )
     parser.add_argument(
-        "--valid-batch-size", type=int, default=64, help="Batch size for validation per GPU."
+        "--valid-batch-size",
+        type=int,
+        default=64,
+        help="Batch size for validation per GPU.",
     )
     parser.add_argument(
-        "--max-steps", type=int, default=None, help="Number of steps to train for (in higher priority to --max_epochs)."
+        "--max-steps",
+        type=int,
+        default=None,
+        help="Number of steps to train for (in higher priority to --max_epochs).",
     )
     parser.add_argument(
-        "--max-epochs", type=int, default=32, help="Number of full epochs to train for (only works if --max_steps is None)."
+        "--max-epochs",
+        type=int,
+        default=32,
+        help="Number of full epochs to train for (only works if --max_steps is None).",
     )
     parser.add_argument(
-        "--valid-step-interval", type=int, default=None, help="The step interval for validation (default to None which disables validation between steps)."
+        "--valid-step-interval",
+        type=int,
+        default=None,
+        help="The step interval for validation (default to None which disables validation between steps).",
     )
     parser.add_argument(
-        "--valid-epoch-interval", type=int, default=1, help="The epoch interval for validation (default to 1, set None to disable validation between epochs)."
+        "--valid-epoch-interval",
+        type=int,
+        default=1,
+        help="The epoch interval for validation (default to 1, set None to disable validation between epochs).",
     )
     parser.add_argument(
-        "--context-length", type=int, default=52, help="The maximum length of input text (include [CLS] & [SEP] tokens). Default to 52."
+        "--context-length",
+        type=int,
+        default=52,
+        help="The maximum length of input text (include [CLS] & [SEP] tokens). Default to 52.",
     )
     parser.add_argument("--lr", type=float, default=None, help="Learning rate.")
     parser.add_argument("--beta1", type=float, default=None, help="Adam beta 1.")
@@ -78,17 +111,22 @@ def parse_args():
     parser.add_argument("--eps", type=float, default=None, help="Adam epsilon.")
     parser.add_argument("--wd", type=float, default=0.2, help="Weight decay.")
     parser.add_argument(
-        "--warmup", type=int, default=500, help="Number of steps to warmup for."
+        "--warmup",
+        type=int,
+        default=500,
+        help="Number of steps to warmup for.",
     )
-    parser.add_argument("--use-bn-sync",
+    parser.add_argument(
+        "--use-bn-sync",
         default=False,
         action="store_true",
-        help="Whether to use batch norm sync."
+        help="Whether to use batch norm sync.",
     )
-    parser.add_argument("--use-augment",
+    parser.add_argument(
+        "--use-augment",
         default=False,
         action="store_true",
-        help="Whether to use image augment."
+        help="Whether to use image augment.",
     )
     parser.add_argument(
         "--skip-scheduler",
@@ -97,10 +135,16 @@ def parse_args():
         help="Use this flag to skip the learning rate decay.",
     )
     parser.add_argument(
-        "--save-epoch-frequency", type=int, default=1, help="How often to save checkpoints by epochs."
+        "--save-epoch-frequency",
+        type=int,
+        default=1,
+        help="How often to save checkpoints by epochs.",
     )
     parser.add_argument(
-        "--save-step-frequency", type=int, default=-1, help="How often to save checkpoints by steps."
+        "--save-step-frequency",
+        type=int,
+        default=-1,
+        help="How often to save checkpoints by steps.",
     )
     parser.add_argument(
         "--resume",
@@ -119,12 +163,12 @@ def parse_args():
         action="store_true",
         default=False,
         help="If resumed from a checkpoint, whether to reset the dataset offset to the beginning.",
-    )    
+    )
     parser.add_argument(
         "--precision",
         choices=["amp", "fp16", "fp32"],
         default="amp",
-        help="Floating point precision."
+        help="Floating point precision.",
     )
     parser.add_argument(
         "--vision-model",
@@ -143,7 +187,7 @@ def parse_args():
         default=None,
         type=str,
         help="The path of openai pretrained weight, used to initialize the image encoder, should be set to None if you do not use pretrained CLIP",
-    )    
+    )
     parser.add_argument(
         "--freeze-vision",
         action="store_true",
@@ -155,7 +199,7 @@ def parse_args():
         choices=["RoBERTa-wwm-ext-base-chinese", "RoBERTa-wwm-ext-large-chinese", "RBT3-chinese"],
         default="RoBERTa-wwm-ext-base-chinese",
         help="Name of the text backbone to use.",
-    )    
+    )
     parser.add_argument(
         "--bert-weight-path",
         default=None,
@@ -165,46 +209,36 @@ def parse_args():
     parser.add_argument(
         "--grad-checkpointing",
         default=False,
-        action='store_true',
+        action="store_true",
         help="Enable gradient checkpointing.",
     )
     parser.add_argument(
         "--use-flash-attention",
         default=False,
         action="store_true",
-        help="Enable flash attention."
+        help="Enable flash attention.",
     )
     parser.add_argument(
         "--accum-freq",
         type=int,
         default=1,
-        help="Update the model every --acum-freq steps."
+        help="Update the model every --acum-freq steps.",
     )
     parser.add_argument(
         "--gather-with-grad",
         default=False,
         action="store_true",
-        help="enable full distributed gradient for feature gather"
+        help="enable full distributed gradient for feature gather",
     )
     # arguments for distributed training
     parser.add_argument(
         "--skip-aggregate",
         default=False,
         action="store_true",
-        help="whether to aggregate features across gpus before computing the loss"
+        help="whether to aggregate features across gpus before computing the loss",
     )
-    parser.add_argument(
-        "--debug",
-        default=False,
-        action="store_true",
-        help="If true, more information is logged."
-    )
-    parser.add_argument(
-        "--seed", 
-        type=int, 
-        default=123, 
-        help="Random seed."
-    )
+    parser.add_argument("--debug", default=False, action="store_true", help="If true, more information is logged.")
+    parser.add_argument("--seed", type=int, default=123, help="Random seed.")
     # args = parser.parse_args()
     args, unknown = parser.parse_known_args()
     args.aggregate = not args.skip_aggregate
