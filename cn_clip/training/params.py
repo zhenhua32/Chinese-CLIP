@@ -205,7 +205,8 @@ def parse_args():
         default=123, 
         help="Random seed."
     )
-    args = parser.parse_args()
+    # args = parser.parse_args()
+    args, unknown = parser.parse_known_args()
     args.aggregate = not args.skip_aggregate
 
     # If some params are not passed, we use the default values based on model name.
